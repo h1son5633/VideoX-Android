@@ -1,3 +1,4 @@
+
 name: Android APK Build
 
 on:
@@ -6,9 +7,12 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    name: Build Debug APK
+    name: Build and Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -37,9 +41,21 @@ jobs:
       - name: Build APK
         run: gradle assembleDebug
 
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: VideoX-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: VideoX Build #${{ github.run_number }}
+          body: |
+            VideoX Android APK 自动构建版本。
+            构建编号：${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
+          prerelease: true
+          make_latest: false
