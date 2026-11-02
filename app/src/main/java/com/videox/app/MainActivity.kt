@@ -5,7 +5,11 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,7 +24,10 @@ import androidx.compose.ui.unit.sp
 private val Bg = Color(0xFF101411)
 private val SurfaceGlass = Color(0xFF1C241F)
 private val SurfaceInner = Color(0xFF252E28)
-private val Green = Color(0xFF62E6A2)
+
+private val AccentColorState =
+    mutableStateOf(Color(0xFF62E6A2))
+
 private val TextMain = Color(0xFFF1F5F2)
 private val TextMuted = Color(0xFF9CAAA1)
 
@@ -69,6 +76,7 @@ fun VideoXApp(sharedText: String) {
                         .padding(horizontal = 16.dp)
                 ) {
                     Spacer(Modifier.height(16.dp))
+
                     when (currentPage) {
                         0 -> ParsePage(sharedText)
                         1 -> DownloadPage()
@@ -84,7 +92,9 @@ fun VideoXApp(sharedText: String) {
 fun ParsePage(sharedText: String) {
     var url by remember { mutableStateOf(sharedText) }
     var platform by remember { mutableStateOf("等待识别") }
-    var message by remember { mutableStateOf("粘贴分享链接后开始识别") }
+    var message by remember {
+        mutableStateOf("粘贴分享链接后开始识别")
+    }
     var recognized by remember { mutableStateOf(false) }
 
     Column(
@@ -92,7 +102,7 @@ fun ParsePage(sharedText: String) {
     ) {
         Text(
             "VideoX",
-            color = Green,
+            color = AccentColorState.value,
             fontSize = 32.sp
         )
 
@@ -130,11 +140,11 @@ fun ParsePage(sharedText: String) {
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextMain,
                     unfocusedTextColor = TextMain,
-                    focusedBorderColor = Green,
+                    focusedBorderColor = AccentColorState.value,
                     unfocusedBorderColor = Color(0xFF46534A),
                     focusedPlaceholderColor = TextMuted,
                     unfocusedPlaceholderColor = TextMuted,
-                    cursorColor = Green
+                    cursorColor = AccentColorState.value
                 )
             )
 
@@ -158,7 +168,11 @@ fun ParsePage(sharedText: String) {
 
             Text(
                 message,
-                color = if (recognized) Green else TextMuted,
+                color = if (recognized) {
+                    AccentColorState.value
+                } else {
+                    TextMuted
+                },
                 fontSize = 14.sp
             )
         }
@@ -179,8 +193,14 @@ fun ParsePage(sharedText: String) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(platform, color = Green, fontSize = 17.sp)
+                        Text(
+                            platform,
+                            color = AccentColorState.value,
+                            fontSize = 17.sp
+                        )
+
                         Spacer(Modifier.height(4.dp))
+
                         Text(
                             "链接已识别，等待解析功能接入",
                             color = TextMuted,
@@ -192,11 +212,12 @@ fun ParsePage(sharedText: String) {
 
                     Button(
                         onClick = {
-                            message = "当前仅完成平台识别，真实下载功能尚未接入"
+                            message =
+                                "当前仅完成平台识别，真实下载功能尚未接入"
                         },
                         shape = RoundedCornerShape(18.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Green
+                            containerColor = AccentColorState.value
                         )
                     ) {
                         Text("下载", color = Color.Black)
@@ -227,8 +248,17 @@ fun DownloadPage() {
     var selectedTab by remember { mutableStateOf(0) }
 
     Column(Modifier.fillMaxSize()) {
-        Text("下载", color = TextMain, fontSize = 28.sp)
-        Text("管理你的下载内容", color = TextMuted, fontSize = 14.sp)
+        Text(
+            "下载",
+            color = TextMain,
+            fontSize = 28.sp
+        )
+
+        Text(
+            "管理你的下载内容",
+            color = TextMuted,
+            fontSize = 14.sp
+        )
 
         Spacer(Modifier.height(20.dp))
 
@@ -236,7 +266,10 @@ fun DownloadPage() {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceInner, RoundedCornerShape(50.dp))
+                    .background(
+                        SurfaceInner,
+                        RoundedCornerShape(50.dp)
+                    )
                     .padding(4.dp)
             ) {
                 TabPill(
@@ -262,12 +295,21 @@ fun DownloadPage() {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(220.dp)
-                    .background(SurfaceInner, RoundedCornerShape(24.dp)),
+                    .background(
+                        SurfaceInner,
+                        RoundedCornerShape(24.dp)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text(
-                        if (selectedTab == 0) "暂无视频任务" else "暂无图集任务",
+                        if (selectedTab == 0) {
+                            "暂无视频任务"
+                        } else {
+                            "暂无图集任务"
+                        },
                         color = TextMain,
                         fontSize = 18.sp
                     )
@@ -293,14 +335,115 @@ fun SettingsPage() {
     var autoClipboard by remember { mutableStateOf(false) }
     var wifiOnly by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize()) {
-        Text("设置", color = TextMain, fontSize = 28.sp)
-        Text("自定义 VideoX 使用体验", color = TextMuted, fontSize = 14.sp)
+    val themeColors = listOf(
+        Color(0xFF62E6A2),
+        Color(0xFF64B5FF),
+        Color(0xFFB388FF),
+        Color(0xFFFF80AB),
+        Color(0xFFFFB74D)
+    )
+
+    val themeNames = listOf(
+        "绿色",
+        "蓝色",
+        "紫色",
+        "粉色",
+        "橙色"
+    )
+
+    Column(
+        Modifier
+            .fillMaxSize()
+    ) {
+        Text(
+            "设置",
+            color = TextMain,
+            fontSize = 28.sp
+        )
+
+        Text(
+            "自定义 VideoX 使用体验",
+            color = TextMuted,
+            fontSize = 14.sp
+        )
 
         Spacer(Modifier.height(20.dp))
 
         RoundedPanel {
-            Text("保存设置", color = Green, fontSize = 16.sp)
+            Text(
+                "主题颜色",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                themeColors.forEachIndexed { index, color ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    color,
+                                    RoundedCornerShape(50.dp)
+                                )
+                                .border(
+                                    if (AccentColorState.value == color) {
+                                        3.dp
+                                    } else {
+                                        1.dp
+                                    },
+                                    if (AccentColorState.value == color) {
+                                        Color.White
+                                    } else {
+                                        Color.White.copy(alpha = 0.25f)
+                                    },
+                                    RoundedCornerShape(50.dp)
+                                )
+                                .clickable {
+                                    AccentColorState.value = color
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (AccentColorState.value == color) {
+                                Text(
+                                    "✓",
+                                    color = Color.Black,
+                                    fontSize = 18.sp
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(5.dp))
+
+                        Text(
+                            themeNames[index],
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            Divider(
+                color = Color.White.copy(alpha = 0.10f)
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                "保存设置",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
 
             Spacer(Modifier.height(8.dp))
 
@@ -333,12 +476,24 @@ fun SettingsPage() {
         Spacer(Modifier.height(16.dp))
 
         RoundedPanel {
-            Text("关于", color = Green, fontSize = 16.sp)
+            Text(
+                "关于",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
 
             Spacer(Modifier.height(12.dp))
 
-            Text("VideoX Android", color = TextMain)
-            Text("版本 0.1.0 · UI 开发阶段", color = TextMuted, fontSize = 13.sp)
+            Text(
+                "VideoX Android",
+                color = TextMain
+            )
+
+            Text(
+                "版本 0.1.0 · UI 开发阶段",
+                color = TextMuted,
+                fontSize = 13.sp
+            )
         }
 
         Spacer(Modifier.weight(1f))
@@ -346,12 +501,20 @@ fun SettingsPage() {
 }
 
 @Composable
-fun RoundedPanel(content: @Composable ColumnScope.() -> Unit) {
+fun RoundedPanel(
+    content: @Composable ColumnScope.() -> Unit
+) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                Color.White.copy(alpha = 0.12f),
+                RoundedCornerShape(28.dp)
+            ),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
-            containerColor = SurfaceGlass
+            containerColor = SurfaceGlass.copy(alpha = 0.72f)
         )
     ) {
         Column(
@@ -373,10 +536,14 @@ fun GreenButton(
             .height(52.dp),
         shape = RoundedCornerShape(18.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Green
+            containerColor = AccentColorState.value
         )
     ) {
-        Text(text, color = Color(0xFF102017), fontSize = 16.sp)
+        Text(
+            text,
+            color = Color(0xFF102017),
+            fontSize = 16.sp
+        )
     }
 }
 
@@ -390,7 +557,11 @@ fun TabPill(
     Box(
         modifier = modifier
             .background(
-                if (selected) Green else Color.Transparent,
+                if (selected) {
+                    AccentColorState.value
+                } else {
+                    Color.Transparent
+                },
                 RoundedCornerShape(50.dp)
             )
             .clickable { onClick() }
@@ -418,16 +589,26 @@ fun SettingSwitch(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, color = TextMain, fontSize = 15.sp)
+            Text(
+                title,
+                color = TextMain,
+                fontSize = 15.sp
+            )
+
             Spacer(Modifier.height(4.dp))
-            Text(subtitle, color = TextMuted, fontSize = 12.sp)
+
+            Text(
+                subtitle,
+                color = TextMuted,
+                fontSize = 12.sp
+            )
         }
 
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Green,
+                checkedThumbColor = AccentColorState.value,
                 checkedTrackColor = Color(0xFF385B46)
             )
         )
@@ -441,40 +622,78 @@ fun BottomNavigationBar(
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .border(
+                1.dp,
+                Color.White.copy(alpha = 0.16f),
+                RoundedCornerShape(28.dp)
+            ),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
-            containerColor = Color(0xFF202820)
+            containerColor = Color(0xFF202820).copy(alpha = 0.72f)
         )
     ) {
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(8.dp)
+                .height(52.dp)
         ) {
-            NavigationItem(
-                text = "解析",
-                selected = currentPage == 0,
-                modifier = Modifier.weight(1f)
-            ) {
-                onPageChange(0)
-            }
+            val itemWidth = maxWidth / 3
 
-            NavigationItem(
-                text = "下载",
-                selected = currentPage == 1,
-                modifier = Modifier.weight(1f)
-            ) {
-                onPageChange(1)
-            }
+            val animatedOffset by animateDpAsState(
+                targetValue = itemWidth * currentPage,
+                animationSpec = tween(
+                    durationMillis = 350,
+                    easing = FastOutSlowInEasing
+                ),
+                label = "nav_slide"
+            )
 
-            NavigationItem(
-                text = "设置",
-                selected = currentPage == 2,
-                modifier = Modifier.weight(1f)
+            Box(
+                modifier = Modifier
+                    .offset(x = animatedOffset)
+                    .width(itemWidth)
+                    .fillMaxHeight()
+                    .background(
+                        AccentColorState.value.copy(alpha = 0.30f),
+                        RoundedCornerShape(22.dp)
+                    )
+                    .border(
+                        1.dp,
+                        AccentColorState.value.copy(alpha = 0.45f),
+                        RoundedCornerShape(22.dp)
+                    )
+            )
+
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                onPageChange(2)
+                NavigationItem(
+                    text = "解析",
+                    selected = currentPage == 0,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    onPageChange(0)
+                }
+
+                NavigationItem(
+                    text = "下载",
+                    selected = currentPage == 1,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    onPageChange(1)
+                }
+
+                NavigationItem(
+                    text = "设置",
+                    selected = currentPage == 2,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    onPageChange(2)
+                }
             }
         }
     }
@@ -489,17 +708,17 @@ fun NavigationItem(
 ) {
     Box(
         modifier = modifier
-            .background(
-                if (selected) Color(0xFF355D43) else Color.Transparent,
-                RoundedCornerShape(22.dp)
-            )
-            .clickable { onClick() }
-            .padding(vertical = 14.dp),
+            .fillMaxHeight()
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text,
-            color = if (selected) Green else TextMuted,
+            color = if (selected) {
+                AccentColorState.value
+            } else {
+                TextMuted
+            },
             fontSize = 15.sp
         )
     }
@@ -509,14 +728,27 @@ fun detectPlatform(input: String): String {
     val text = input.lowercase()
 
     return when {
-        "douyin.com" in text || "iesdouyin.com" in text -> "抖音"
-        "kuaishou.com" in text || "gifshow.com" in text -> "快手"
-        "xiaohongshu.com" in text || "xhslink.com" in text -> "小红书"
-        "bilibili.com" in text || "b23.tv" in text -> "哔哩哔哩"
-        "weibo.com" in text || "weibo.cn" in text -> "微博"
+        "douyin.com" in text ||
+                "iesdouyin.com" in text -> "抖音"
+
+        "kuaishou.com" in text ||
+                "gifshow.com" in text -> "快手"
+
+        "xiaohongshu.com" in text ||
+                "xhslink.com" in text -> "小红书"
+
+        "bilibili.com" in text ||
+                "b23.tv" in text -> "哔哩哔哩"
+
+        "weibo.com" in text ||
+                "weibo.cn" in text -> "微博"
+
         "ixigua.com" in text -> "西瓜视频"
+
         "pipix.com" in text -> "皮皮虾"
+
         "toutiao.com" in text -> "今日头条"
+
         else -> "未知平台"
     }
 }
