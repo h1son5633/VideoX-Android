@@ -1,8 +1,13 @@
 
 package com.videox.app
 
+import android.content.Context
 import android.content.Intent
+import android.app.DownloadManager
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateDpAsState
@@ -18,8 +23,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.URL
+import java.net.URLEncoder
 
 private val Bg = Color(0xFF101411)
 private val SurfaceGlass = Color(0xFF1C241F)
@@ -96,10 +108,17 @@ fun ParsePage(sharedText: String) {
         mutableStateOf("粘贴分享链接后开始识别")
     }
     var recognized by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
+    var videoTitle by remember { mutableStateOf("") }
+    var author by remember { mutableStateOf("") }
+    var coverUrl by remember { mutableStateOf("") }
+    var videoUrl by remember { mutableStateOf("") }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.fillMaxSize()) {
         Text(
             "VideoX",
             color = AccentColorState.value,
@@ -130,10 +149,14 @@ fun ParsePage(sharedText: String) {
                     platform = "等待识别"
                     message = "粘贴分享链接后开始识别"
                     recognized = false
+                    videoTitle = ""
+                    author = ""
+                    coverUrl = ""
+                    videoUrl = ""
                 },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
-                    Text("粘贴视频或图集分享链接")
+                    Text("粘贴抖音视频分享链接")
                 },
                 minLines = 3,
                 shape = RoundedCornerShape(20.dp),
@@ -151,15 +174,71 @@ fun ParsePage(sharedText: String) {
             Spacer(Modifier.height(16.dp))
 
             GreenButton(
-                text = "识别链接",
+                text = if (loading) "正在解析..." else "解析并获取视频",
                 onClick = {
-                    platform = detectPlatform(url)
-                    recognized = platform != "未知平台"
+                    when {
+                        url.isBlank() -> {
+                            message = "请先粘贴链接"
+                        }
 
-                    message = when {
-                        url.isBlank() -> "请先粘贴链接"
-                        recognized -> "已识别平台：$platform"
-                        else -> "暂不支持识别该链接"
+                        detectPlatform(url) != "抖音" -> {
+                            platform = detectPlatform(url)
+                            recognized = false
+                            message = "当前版本暂时只支持抖音解析"
+                        }
+
+                        loading -> {
+                            // 正在解析时不重复请求
+                        }
+
+                        else -> {
+                            loading = true
+                            recognized = false
+                            platform = "抖音"
+                            message = "正在请求解析接口..."
+
+                            scope.launch {
+                                try {
+                                    val result = parseDouyin(url)
+
+                                    val code = result.optInt("code")
+                                    val data = result.optJSONObject("data")
+
+                                    if (code == 200 && data != null) {
+                                        videoTitle =
+                                            data.optString("title", "抖音视频")
+
+                                        author =
+                                            data.optString("author", "未知作者")
+
+                                        coverUrl =
+                                            data.optString("cover", "")
+
+                                        videoUrl =
+                                            data.optString("url", "")
+
+                                        recognized =
+                                            videoUrl.startsWith("http")
+
+                                        message = if (recognized) {
+                                            "解析成功，可以下载视频"
+                                        } else {
+                                            "解析成功，但没有获取到视频地址"
+                                        }
+                                    } else {
+                                        message = result.optString(
+                                            "msg",
+                                            "解析失败，请更换链接重试"
+                                        )
+                                    }
+                                } catch (e: Exception) {
+                                    message =
+                                        "解析失败：${e.message ?: "网络错误"}"
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        }
                     }
                 }
             )
@@ -189,43 +268,45 @@ fun ParsePage(sharedText: String) {
             Spacer(Modifier.height(12.dp))
 
             if (recognized) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            platform,
-                            color = AccentColorState.value,
-                            fontSize = 17.sp
-                        )
+                Text(
+                    videoTitle,
+                    color = TextMain,
+                    fontSize = 17.sp
+                )
 
-                        Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
 
-                        Text(
-                            "链接已识别，等待解析功能接入",
-                            color = TextMuted,
-                            fontSize = 12.sp
-                        )
-                    }
+                Text(
+                    "作者：$author",
+                    color = TextMuted,
+                    fontSize = 13.sp
+                )
 
-                    Spacer(Modifier.width(10.dp))
+                if (coverUrl.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
 
-                    Button(
-                        onClick = {
-                            message =
-                                "当前仅完成平台识别，真实下载功能尚未接入"
-                        },
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AccentColorState.value
-                        )
-                    ) {
-                        Text("下载", color = Color.Black)
-                    }
+                    Text(
+                        "已获取封面地址",
+                        color = AccentColorState.value,
+                        fontSize = 12.sp
+                    )
                 }
+
+                Spacer(Modifier.height(14.dp))
+
+                GreenButton(
+                    text = "下载视频",
+                    onClick = {
+                        downloadVideo(
+                            context = context,
+                            videoUrl = videoUrl,
+                            title = videoTitle
+                        )
+                    }
+                )
             } else {
                 Text(
-                    "识别后将在这里显示媒体预览和下载入口",
+                    "解析后将在这里显示视频标题和下载入口",
                     color = TextMuted,
                     fontSize = 13.sp
                 )
@@ -240,6 +321,82 @@ fun ParsePage(sharedText: String) {
             fontSize = 12.sp,
             modifier = Modifier.align(Alignment.CenterHorizontally)
         )
+    }
+}
+
+suspend fun parseDouyin(inputUrl: String): JSONObject {
+    return withContext(Dispatchers.IO) {
+        val encodedUrl = URLEncoder.encode(
+            inputUrl.trim(),
+            "UTF-8"
+        )
+
+        val apiUrl =
+            "http://api.xhus.cn/api/douyin?url=$encodedUrl"
+
+        val connection = URL(apiUrl).openConnection()
+
+        connection.connectTimeout = 15000
+        connection.readTimeout = 20000
+
+        val response = connection.getInputStream()
+            .bufferedReader()
+            .use { it.readText() }
+
+        JSONObject(response)
+    }
+}
+
+fun downloadVideo(
+    context: Context,
+    videoUrl: String,
+    title: String
+) {
+    try {
+        if (!videoUrl.startsWith("http")) {
+            Toast.makeText(
+                context,
+                "视频地址无效",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val request = DownloadManager.Request(
+            Uri.parse(videoUrl)
+        )
+            .setTitle(
+                title.ifBlank { "VideoX 抖音视频" }
+            )
+            .setDescription("VideoX 正在下载")
+            .setNotificationVisibility(
+                DownloadManager.Request
+                    .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+            )
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+            .setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                "VideoX_${System.currentTimeMillis()}.mp4"
+            )
+
+        val manager = context.getSystemService(
+            Context.DOWNLOAD_SERVICE
+        ) as DownloadManager
+
+        manager.enqueue(request)
+
+        Toast.makeText(
+            context,
+            "已加入下载任务，请查看系统下载通知",
+            Toast.LENGTH_LONG
+        ).show()
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "下载失败：${e.message}",
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
 
@@ -351,10 +508,7 @@ fun SettingsPage() {
         "橙色"
     )
 
-    Column(
-        Modifier
-            .fillMaxSize()
-    ) {
+    Column(Modifier.fillMaxSize()) {
         Text(
             "设置",
             color = TextMain,
@@ -490,7 +644,7 @@ fun SettingsPage() {
             )
 
             Text(
-                "版本 0.1.0 · UI 开发阶段",
+                "版本 0.1.0 · 抖音解析测试版",
                 color = TextMuted,
                 fontSize = 13.sp
             )
