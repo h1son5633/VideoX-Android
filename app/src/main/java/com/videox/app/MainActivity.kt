@@ -437,11 +437,11 @@ fun SettingSwitch(
 @Composable
 fun BottomNavigationBar(
     currentPage: Int,
-    onPageChange: (Int) -> Unit
+    onPageChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFF202820)
