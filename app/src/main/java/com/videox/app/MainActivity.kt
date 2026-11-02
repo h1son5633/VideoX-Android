@@ -7,9 +7,15 @@ import android.app.DownloadManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.provider.OpenableColumns
+import android.content.ClipboardManager
 import android.widget.Toast
+
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -17,6 +23,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,12 +34,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
 import org.json.JSONObject
+
 import java.net.URL
 import java.net.URLEncoder
+import java.net.HttpURLConnection
 
 private val Bg = Color(0xFF101411)
 private val SurfaceGlass = Color(0xFF1C241F)
@@ -44,18 +56,33 @@ private val TextMain = Color(0xFFF1F5F2)
 private val TextMuted = Color(0xFF9CAAA1)
 
 class MainActivity : ComponentActivity() {
+
+    private var sharedText by mutableStateOf("")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val sharedText = if (intent?.action == Intent.ACTION_SEND) {
-            intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
-        } else {
-            ""
-        }
+        sharedText = getSharedText(intent)
 
         setContent {
             VideoXApp(sharedText)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedText = getSharedText(intent)
+    }
+
+    private fun getSharedText(intent: Intent?): String {
+        if (intent?.action != Intent.ACTION_SEND) {
+            return ""
+        }
+
+        return intent.getCharSequenceExtra(Intent.EXTRA_TEXT)
+            ?.toString()
+            .orEmpty()
     }
 }
 
@@ -72,21 +99,27 @@ fun VideoXApp(sharedText: String) {
                     onPageChange = { currentPage = it },
                     modifier = Modifier
                         .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(
+                            horizontal = 16.dp,
+                            vertical = 8.dp
+                        )
                 )
             }
         ) { innerPadding ->
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Bg)
                     .padding(innerPadding)
             ) {
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp)
                 ) {
+
                     Spacer(Modifier.height(16.dp))
 
                     when (currentPage) {
@@ -102,23 +135,111 @@ fun VideoXApp(sharedText: String) {
 
 @Composable
 fun ParsePage(sharedText: String) {
+
     var url by remember { mutableStateOf(sharedText) }
-    var platform by remember { mutableStateOf("等待识别") }
+
+    var platform by remember {
+        mutableStateOf("等待识别")
+    }
+
     var message by remember {
         mutableStateOf("粘贴分享链接后开始识别")
     }
-    var recognized by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
+
+    var recognized by remember {
+        mutableStateOf(false)
+    }
+
+    var loading by remember {
+        mutableStateOf(false)
+    }
 
     var videoTitle by remember { mutableStateOf("") }
     var author by remember { mutableStateOf("") }
     var coverUrl by remember { mutableStateOf("") }
     var videoUrl by remember { mutableStateOf("") }
 
+    var localFileName by remember {
+        mutableStateOf("")
+    }
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    // TXT 文件选择器
+    val txtPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+
+        if (uri != null) {
+
+            scope.launch {
+                try {
+
+                    val content = withContext(Dispatchers.IO) {
+
+                        context.contentResolver
+                            .openInputStream(uri)
+                            ?.bufferedReader()
+                            ?.use { it.readText() }
+                            ?: throw Exception("无法读取文件")
+                    }
+
+                    url = content
+                    recognized = false
+                    message = "TXT 文件读取成功，点击解析即可"
+
+                } catch (e: Exception) {
+
+                    message = "TXT 读取失败：${e.message}"
+                }
+            }
+        }
+    }
+
+    // 本地视频选择器
+    val videoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+
+        if (uri != null) {
+
+            try {
+
+                localFileName = getDisplayName(context, uri)
+
+                message = "已选择本地视频：$localFileName"
+
+                Toast.makeText(
+                    context,
+                    "本地视频已选择",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+            } catch (e: Exception) {
+
+                message = "读取视频信息失败：${e.message}"
+            }
+        }
+    }
+
+    // 接收其他应用分享的内容
+    LaunchedEffect(sharedText) {
+
+        if (sharedText.isNotBlank()) {
+
+            url = sharedText
+            recognized = false
+            message = "已接收分享内容，请点击解析"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+
         Text(
             "VideoX",
             color = AccentColorState.value,
@@ -134,6 +255,7 @@ fun ParsePage(sharedText: String) {
         Spacer(Modifier.height(24.dp))
 
         RoundedPanel {
+
             Text(
                 "链接",
                 color = TextMain,
@@ -147,7 +269,7 @@ fun ParsePage(sharedText: String) {
                 onValueChange = {
                     url = it
                     platform = "等待识别"
-                    message = "粘贴分享链接后开始识别"
+                    message = "等待解析"
                     recognized = false
                     videoTitle = ""
                     author = ""
@@ -156,7 +278,7 @@ fun ParsePage(sharedText: String) {
                 },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
-                    Text("粘贴抖音视频分享链接")
+                    Text("粘贴抖音分享文案或视频链接")
                 },
                 minLines = 3,
                 shape = RoundedCornerShape(20.dp),
@@ -171,70 +293,168 @@ fun ParsePage(sharedText: String) {
                 )
             )
 
+            Spacer(Modifier.height(12.dp))
+
+            // 粘贴和 TXT 按钮
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+
+                        val clipboard =
+                            context.getSystemService(
+                                Context.CLIPBOARD_SERVICE
+                            ) as ClipboardManager
+
+                        url = clipboard.primaryClip
+                            ?.getItemAt(0)
+                            ?.coerceToText(context)
+                            ?.toString()
+                            .orEmpty()
+
+                        recognized = false
+
+                        message = if (url.isBlank()) {
+                            "剪贴板没有文字"
+                        } else {
+                            "已读取剪贴板"
+                        }
+                    }
+                ) {
+                    Text("粘贴")
+                }
+
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        txtPicker.launch(
+                            arrayOf("text/plain", "text/*")
+                        )
+                    }
+                ) {
+                    Text("读取 TXT")
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // 本地视频选择
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    videoPicker.launch(
+                        arrayOf("video/*")
+                    )
+                }
+            ) {
+                Text("选择本地视频")
+            }
+
+            if (localFileName.isNotBlank()) {
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    "本地文件：$localFileName",
+                    color = AccentColorState.value,
+                    fontSize = 12.sp
+                )
+            }
+
             Spacer(Modifier.height(16.dp))
 
+            // 解析按钮
             GreenButton(
-                text = if (loading) "正在解析..." else "解析并获取视频",
+                text = if (loading) {
+                    "正在解析..."
+                } else {
+                    "解析并获取视频"
+                },
                 onClick = {
+
+                    if (loading) {
+                        return@GreenButton
+                    }
+
+                    val douyinUrl = extractDouyinUrl(url)
+
                     when {
+
                         url.isBlank() -> {
-                            message = "请先粘贴链接"
+                            message = "请先粘贴链接或读取 TXT 文件"
                         }
 
-                        detectPlatform(url) != "抖音" -> {
+                        douyinUrl == null -> {
+
                             platform = detectPlatform(url)
                             recognized = false
-                            message = "当前版本暂时只支持抖音解析"
-                        }
-
-                        loading -> {
-                            // 正在解析时不重复请求
+                            message = "没有识别到有效的抖音分享链接"
                         }
 
                         else -> {
+
                             loading = true
                             recognized = false
                             platform = "抖音"
                             message = "正在请求解析接口..."
 
                             scope.launch {
+
                                 try {
-                                    val result = parseDouyin(url)
+
+                                    val result = parseDouyin(douyinUrl)
 
                                     val code = result.optInt("code")
                                     val data = result.optJSONObject("data")
 
                                     if (code == 200 && data != null) {
-                                        videoTitle =
-                                            data.optString("title", "抖音视频")
 
-                                        author =
-                                            data.optString("author", "未知作者")
+                                        videoTitle = data.optString(
+                                            "title",
+                                            "抖音视频"
+                                        )
 
-                                        coverUrl =
-                                            data.optString("cover", "")
+                                        author = data.optString(
+                                            "author",
+                                            "未知作者"
+                                        )
 
-                                        videoUrl =
-                                            data.optString("url", "")
+                                        coverUrl = data.optString(
+                                            "cover",
+                                            ""
+                                        )
+
+                                        videoUrl = data.optString(
+                                            "url",
+                                            ""
+                                        )
 
                                         recognized =
-                                            videoUrl.startsWith("http")
+                                            videoUrl.startsWith("http://") ||
+                                            videoUrl.startsWith("https://")
 
                                         message = if (recognized) {
                                             "解析成功，可以下载视频"
                                         } else {
-                                            "解析成功，但没有获取到视频地址"
+                                            "解析成功，但没有获取到有效的视频地址"
                                         }
+
                                     } else {
-                                        message = result.optString(
-                                            "msg",
-                                            "解析失败，请更换链接重试"
-                                        )
+
+                                        message =
+                                            "接口返回错误：${result.optString("msg", "未知错误")}（code=$code）"
                                     }
+
                                 } catch (e: Exception) {
+
                                     message =
-                                        "解析失败：${e.message ?: "网络错误"}"
+                                        "解析失败：${e.message ?: "未知错误"}"
+
                                 } finally {
+
                                     loading = false
                                 }
                             }
@@ -258,7 +478,9 @@ fun ParsePage(sharedText: String) {
 
         Spacer(Modifier.height(18.dp))
 
+        // 识别结果
         RoundedPanel {
+
             Text(
                 "识别结果",
                 color = TextMain,
@@ -268,6 +490,7 @@ fun ParsePage(sharedText: String) {
             Spacer(Modifier.height(12.dp))
 
             if (recognized) {
+
                 Text(
                     videoTitle,
                     color = TextMain,
@@ -283,6 +506,7 @@ fun ParsePage(sharedText: String) {
                 )
 
                 if (coverUrl.isNotBlank()) {
+
                     Spacer(Modifier.height(6.dp))
 
                     Text(
@@ -304,7 +528,9 @@ fun ParsePage(sharedText: String) {
                         )
                     }
                 )
+
             } else {
+
                 Text(
                     "解析后将在这里显示视频标题和下载入口",
                     color = TextMuted,
@@ -313,19 +539,39 @@ fun ParsePage(sharedText: String) {
             }
         }
 
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(18.dp))
 
         Text(
             "VideoX · Android",
             color = TextMuted,
             fontSize = 12.sp,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
+            modifier = Modifier.align(
+                Alignment.CenterHorizontally
+            )
         )
+
+        Spacer(Modifier.height(16.dp))
     }
 }
 
+// 提取抖音分享链接
+fun extractDouyinUrl(input: String): String? {
+
+    val regex = Regex(
+        """https?://(?:v\.douyin\.com|www\.douyin\.com|douyin\.com)/[^\s，。]+""",
+        RegexOption.IGNORE_CASE
+    )
+
+    return regex.find(input)
+        ?.value
+        ?.trimEnd('.', ',', '，', '。', ')', '）')
+}
+
+// 请求抖音解析接口
 suspend fun parseDouyin(inputUrl: String): JSONObject {
+
     return withContext(Dispatchers.IO) {
+
         val encodedUrl = URLEncoder.encode(
             inputUrl.trim(),
             "UTF-8"
@@ -334,31 +580,118 @@ suspend fun parseDouyin(inputUrl: String): JSONObject {
         val apiUrl =
             "http://api.xhus.cn/api/douyin?url=$encodedUrl"
 
-        val connection = URL(apiUrl).openConnection()
+        val connection = URL(apiUrl)
+            .openConnection() as HttpURLConnection
 
-        connection.connectTimeout = 15000
-        connection.readTimeout = 20000
+        try {
 
-        val response = connection.getInputStream()
-            .bufferedReader()
-            .use { it.readText() }
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 20000
+            connection.readTimeout = 30000
 
-        JSONObject(response)
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0"
+            )
+
+            connection.setRequestProperty(
+                "Accept",
+                "application/json"
+            )
+
+            val status = connection.responseCode
+
+            val stream = if (status in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+
+            val response = stream
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: throw Exception(
+                    "服务器没有返回内容，HTTP $status"
+                )
+
+            if (status !in 200..299) {
+
+                throw Exception(
+                    "接口 HTTP $status：${response.take(300)}"
+                )
+            }
+
+            val cleanResponse = response
+                .removePrefix("\uFEFF")
+                .trim()
+
+            if (!cleanResponse.startsWith("{")) {
+
+                throw Exception(
+                    "接口返回的不是 JSON：${cleanResponse.take(200)}"
+                )
+            }
+
+            JSONObject(cleanResponse)
+
+        } finally {
+
+            connection.disconnect()
+        }
     }
 }
 
+// 获取本地文件名称
+fun getDisplayName(
+    context: Context,
+    uri: Uri
+): String {
+
+    var name = "未命名文件"
+
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+
+        if (cursor.moveToFirst()) {
+
+            val index = cursor.getColumnIndex(
+                OpenableColumns.DISPLAY_NAME
+            )
+
+            if (index >= 0) {
+                name = cursor.getString(index) ?: name
+            }
+        }
+    }
+
+    return name
+}
+
+// 下载视频
 fun downloadVideo(
     context: Context,
     videoUrl: String,
     title: String
 ) {
+
     try {
-        if (!videoUrl.startsWith("http")) {
+
+        if (
+            !videoUrl.startsWith("http://") &&
+            !videoUrl.startsWith("https://")
+        ) {
+
             Toast.makeText(
                 context,
                 "视频地址无效",
                 Toast.LENGTH_SHORT
             ).show()
+
             return
         }
 
@@ -366,7 +699,9 @@ fun downloadVideo(
             Uri.parse(videoUrl)
         )
             .setTitle(
-                title.ifBlank { "VideoX 抖音视频" }
+                title.ifBlank {
+                    "VideoX 抖音视频"
+                }
             )
             .setDescription("VideoX 正在下载")
             .setNotificationVisibility(
@@ -391,7 +726,9 @@ fun downloadVideo(
             "已加入下载任务，请查看系统下载通知",
             Toast.LENGTH_LONG
         ).show()
+
     } catch (e: Exception) {
+
         Toast.makeText(
             context,
             "下载失败：${e.message}",
@@ -400,11 +737,16 @@ fun downloadVideo(
     }
 }
 
+// 下载页面
 @Composable
 fun DownloadPage() {
-    var selectedTab by remember { mutableStateOf(0) }
+
+    var selectedTab by remember {
+        mutableStateOf(0)
+    }
 
     Column(Modifier.fillMaxSize()) {
+
         Text(
             "下载",
             color = TextMain,
@@ -420,6 +762,7 @@ fun DownloadPage() {
         Spacer(Modifier.height(20.dp))
 
         RoundedPanel {
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -429,6 +772,7 @@ fun DownloadPage() {
                     )
                     .padding(4.dp)
             ) {
+
                 TabPill(
                     text = "视频",
                     selected = selectedTab == 0,
@@ -458,9 +802,11 @@ fun DownloadPage() {
                     ),
                 contentAlignment = Alignment.Center
             ) {
+
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+
                     Text(
                         if (selectedTab == 0) {
                             "暂无视频任务"
@@ -486,11 +832,21 @@ fun DownloadPage() {
     }
 }
 
+// 设置页面
 @Composable
 fun SettingsPage() {
-    var saveToGallery by remember { mutableStateOf(true) }
-    var autoClipboard by remember { mutableStateOf(false) }
-    var wifiOnly by remember { mutableStateOf(false) }
+
+    var saveToGallery by remember {
+        mutableStateOf(true)
+    }
+
+    var autoClipboard by remember {
+        mutableStateOf(false)
+    }
+
+    var wifiOnly by remember {
+        mutableStateOf(false)
+    }
 
     val themeColors = listOf(
         Color(0xFF62E6A2),
@@ -509,6 +865,7 @@ fun SettingsPage() {
     )
 
     Column(Modifier.fillMaxSize()) {
+
         Text(
             "设置",
             color = TextMain,
@@ -524,6 +881,7 @@ fun SettingsPage() {
         Spacer(Modifier.height(20.dp))
 
         RoundedPanel {
+
             Text(
                 "主题颜色",
                 color = AccentColorState.value,
@@ -536,10 +894,13 @@ fun SettingsPage() {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+
                 themeColors.forEachIndexed { index, color ->
+
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
@@ -565,7 +926,9 @@ fun SettingsPage() {
                                 },
                             contentAlignment = Alignment.Center
                         ) {
+
                             if (AccentColorState.value == color) {
+
                                 Text(
                                     "✓",
                                     color = Color.Black,
@@ -605,7 +968,9 @@ fun SettingsPage() {
                 title = "默认保存到相册",
                 subtitle = "下载完成后保存到系统媒体库",
                 checked = saveToGallery,
-                onCheckedChange = { saveToGallery = it }
+                onCheckedChange = {
+                    saveToGallery = it
+                }
             )
 
             Divider(color = Color(0xFF39443C))
@@ -614,7 +979,9 @@ fun SettingsPage() {
                 title = "自动识别剪贴板",
                 subtitle = "检测到分享链接时提示识别",
                 checked = autoClipboard,
-                onCheckedChange = { autoClipboard = it }
+                onCheckedChange = {
+                    autoClipboard = it
+                }
             )
 
             Divider(color = Color(0xFF39443C))
@@ -623,13 +990,16 @@ fun SettingsPage() {
                 title = "仅 Wi-Fi 下载",
                 subtitle = "避免使用移动网络消耗流量",
                 checked = wifiOnly,
-                onCheckedChange = { wifiOnly = it }
+                onCheckedChange = {
+                    wifiOnly = it
+                }
             )
         }
 
         Spacer(Modifier.height(16.dp))
 
         RoundedPanel {
+
             Text(
                 "关于",
                 color = AccentColorState.value,
@@ -654,10 +1024,12 @@ fun SettingsPage() {
     }
 }
 
+// 圆角面板
 @Composable
 fun RoundedPanel(
     content: @Composable ColumnScope.() -> Unit
 ) {
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -671,6 +1043,7 @@ fun RoundedPanel(
             containerColor = SurfaceGlass.copy(alpha = 0.72f)
         )
     ) {
+
         Column(
             modifier = Modifier.padding(18.dp),
             content = content
@@ -678,11 +1051,13 @@ fun RoundedPanel(
     }
 }
 
+// 绿色按钮
 @Composable
 fun GreenButton(
     text: String,
     onClick: () -> Unit
 ) {
+
     Button(
         onClick = onClick,
         modifier = Modifier
@@ -693,6 +1068,7 @@ fun GreenButton(
             containerColor = AccentColorState.value
         )
     ) {
+
         Text(
             text,
             color = Color(0xFF102017),
@@ -701,6 +1077,7 @@ fun GreenButton(
     }
 }
 
+// 下载页面切换按钮
 @Composable
 fun TabPill(
     text: String,
@@ -708,6 +1085,7 @@ fun TabPill(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+
     Box(
         modifier = modifier
             .background(
@@ -718,17 +1096,25 @@ fun TabPill(
                 },
                 RoundedCornerShape(50.dp)
             )
-            .clickable { onClick() }
+            .clickable {
+                onClick()
+            }
             .padding(vertical = 11.dp),
         contentAlignment = Alignment.Center
     ) {
+
         Text(
             text,
-            color = if (selected) Color.Black else TextMuted
+            color = if (selected) {
+                Color.Black
+            } else {
+                TextMuted
+            }
         )
     }
 }
 
+// 设置开关
 @Composable
 fun SettingSwitch(
     title: String,
@@ -736,13 +1122,16 @@ fun SettingSwitch(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+
         Column(Modifier.weight(1f)) {
+
             Text(
                 title,
                 color = TextMain,
@@ -769,12 +1158,14 @@ fun SettingSwitch(
     }
 }
 
+// 底部导航
 @Composable
 fun BottomNavigationBar(
     currentPage: Int,
     onPageChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -788,12 +1179,14 @@ fun BottomNavigationBar(
             containerColor = Color(0xFF202820).copy(alpha = 0.72f)
         )
     ) {
+
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(8.dp)
                 .height(52.dp)
         ) {
+
             val itemWidth = maxWidth / 3
 
             val animatedOffset by animateDpAsState(
@@ -825,6 +1218,7 @@ fun BottomNavigationBar(
                 modifier = Modifier.fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+
                 NavigationItem(
                     text = "解析",
                     selected = currentPage == 0,
@@ -853,6 +1247,7 @@ fun BottomNavigationBar(
     }
 }
 
+// 导航项目
 @Composable
 fun NavigationItem(
     text: String,
@@ -860,12 +1255,16 @@ fun NavigationItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .clickable { onClick() },
+            .clickable {
+                onClick()
+            },
         contentAlignment = Alignment.Center
     ) {
+
         Text(
             text,
             color = if (selected) {
@@ -878,10 +1277,13 @@ fun NavigationItem(
     }
 }
 
+// 平台识别
 fun detectPlatform(input: String): String {
+
     val text = input.lowercase()
 
     return when {
+
         "douyin.com" in text ||
                 "iesdouyin.com" in text -> "抖音"
 
