@@ -438,6 +438,7 @@ fun SettingSwitch(
 fun BottomNavigationBar(
     currentPage: Int,
     onPageChange: (Int) -> Unit
+    modifier: Modifier = Modifier
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
