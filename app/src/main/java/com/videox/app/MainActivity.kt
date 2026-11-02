@@ -739,96 +739,72 @@ fun downloadVideo(
 
 // 下载页面
 @Composable
-fun DownloadPage() {
 
-    var selectedTab by remember {
-        mutableStateOf(0)
-    }
-
-    Column(Modifier.fillMaxSize()) {
-
-        Text(
-            "下载",
-            color = TextMain,
-            fontSize = 28.sp
-        )
-
-        Text(
-            "管理你的下载内容",
-            color = TextMuted,
-            fontSize = 14.sp
-        )
-
-        Spacer(Modifier.height(20.dp))
-
-        RoundedPanel {
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        SurfaceInner,
-                        RoundedCornerShape(50.dp)
-                    )
-                    .padding(4.dp)
-            ) {
-
-                TabPill(
-                    text = "视频",
-                    selected = selectedTab == 0,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    selectedTab = 0
-                }
-
-                TabPill(
-                    text = "图集",
-                    selected = selectedTab == 1,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    selectedTab = 1
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(220.dp)
-                    .background(
-                        SurfaceInner,
-                        RoundedCornerShape(24.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-
-                    Text(
-                        if (selectedTab == 0) {
-                            "暂无视频任务"
-                        } else {
-                            "暂无图集任务"
-                        },
-                        color = TextMain,
-                        fontSize = 18.sp
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    Text(
-                        "识别并添加下载后，内容会显示在这里",
-                        color = TextMuted,
-                        fontSize = 12.sp
-                    )
-                }
-            }
+fun downloadVideo(
+    context: Context,
+    videoUrl: String,
+    title: String
+) {
+    try {
+        if (
+            !videoUrl.startsWith("https://") &&
+            !videoUrl.startsWith("http://")
+        ) {
+            Toast.makeText(
+                context,
+                "视频地址无效，无法下载",
+                Toast.LENGTH_LONG
+            ).show()
+            return
         }
 
-        Spacer(Modifier.weight(1f))
+        val manager = context.getSystemService(
+            Context.DOWNLOAD_SERVICE
+        ) as DownloadManager
+
+        val request = DownloadManager.Request(
+            Uri.parse(videoUrl)
+        )
+            .setTitle(
+                title.ifBlank { "VideoX 视频" }
+            )
+            .setDescription("VideoX 正在下载")
+            .setMimeType("video/mp4")
+            .setNotificationVisibility(
+                DownloadManager.Request
+                    .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+            )
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+            .setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                "VideoX_${System.currentTimeMillis()}.mp4"
+            )
+
+        request.addRequestHeader(
+            "User-Agent",
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
+        )
+
+        request.addRequestHeader(
+            "Referer",
+            "https://www.douyin.com/"
+        )
+
+        val downloadId = manager.enqueue(request)
+
+        Toast.makeText(
+            context,
+            "下载任务已提交，正在下载",
+            Toast.LENGTH_LONG
+        ).show()
+
+    } catch (e: Exception) {
+        Toast.makeText(
+            context,
+            "下载提交失败：${e.message}",
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
 
