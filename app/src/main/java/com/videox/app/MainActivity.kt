@@ -45,32 +45,36 @@ fun VideoXApp(sharedText: String) {
     var currentPage by remember { mutableStateOf(0) }
 
     MaterialTheme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Bg)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp)
-            ) {
-                Spacer(Modifier.height(28.dp))
-
-                when (currentPage) {
-                    0 -> ParsePage(sharedText)
-                    1 -> DownloadPage()
-                    2 -> SettingsPage()
-                }
-
-                Spacer(Modifier.height(12.dp))
-
+        Scaffold(
+            containerColor = Bg,
+            bottomBar = {
                 BottomNavigationBar(
                     currentPage = currentPage,
-                    onPageChange = { currentPage = it }
+                    onPageChange = { currentPage = it },
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
-
-                Spacer(Modifier.height(12.dp))
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Bg)
+                    .padding(innerPadding)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                ) {
+                    Spacer(Modifier.height(16.dp))
+                    when (currentPage) {
+                        0 -> ParsePage(sharedText)
+                        1 -> DownloadPage()
+                        2 -> SettingsPage()
+                    }
+                }
             }
         }
     }
