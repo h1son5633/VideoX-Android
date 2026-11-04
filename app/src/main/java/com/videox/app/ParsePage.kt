@@ -28,6 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -231,6 +233,11 @@ fun ParsePage(sharedText: String) {
         mutableStateOf("")
     }
 
+    // 已读取的 TXT 文件名（非空表示输入内容来自这个 TXT，可一键清除）
+    var txtFileName by remember {
+        mutableStateOf("")
+    }
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -277,7 +284,7 @@ fun ParsePage(sharedText: String) {
             return
         }
 
-        val douyinUrl = extractDouyinUrl(url)
+        val shareLink = extractShareLink(url)
 
         when {
 
@@ -285,12 +292,14 @@ fun ParsePage(sharedText: String) {
                 message = "请先粘贴链接或读取 TXT 文件"
             }
 
-            douyinUrl == null -> {
+            shareLink == null -> {
                 recognized = false
-                message = "没有识别到有效的抖音分享链接"
+                message = "没有识别到有效的抖音/B站分享链接"
             }
 
             else -> {
+
+                val (linkUrl, platform) = shareLink
 
                 loading = true
                 recognized = false
@@ -313,39 +322,71 @@ fun ParsePage(sharedText: String) {
 
                     try {
 
-                        val result = parseDouyin(douyinUrl)
+                        val result = parseShare(linkUrl, platform)
 
                         val code = result.optInt("code")
                         val data = result.optJSONObject("data")
 
                         if (code == 200 && data != null) {
 
+                            val defaultTitle =
+                                if (platform == "bilibili") {
+                                    "B站视频"
+                                } else {
+                                    "抖音视频"
+                                }
+
                             videoTitle = data.optString(
                                 "title",
-                                "抖音视频"
+                                defaultTitle
                             ).ifBlank {
-                                "抖音视频"
+                                defaultTitle
                             }
 
+                            // 抖音用 desc，B站用 description，两边都兜住
                             fullText = data.optString(
                                 "desc",
                                 ""
                             ).ifBlank {
+                                data.optString(
+                                    "description",
+                                    ""
+                                )
+                            }.ifBlank {
                                 videoTitle
                             }
 
+                            // 抖音：author 对象/字符串；B站：user.name
                             val authorObject =
                                 data.optJSONObject("author")
 
-                            author = authorObject?.optString(
-                                "name",
-                                "未知作者"
-                            )?.ifBlank {
-                                "未知作者"
-                            } ?: data.optString(
-                                "author",
-                                "未知作者"
-                            )
+                            val userObject =
+                                data.optJSONObject("user")
+
+                            author = when {
+
+                                authorObject != null ->
+                                    authorObject.optString(
+                                        "name",
+                                        "未知作者"
+                                    ).ifBlank {
+                                        "未知作者"
+                                    }
+
+                                data.optString("author", "")
+                                    .isNotBlank() ->
+                                    data.optString("author", "")
+
+                                userObject != null ->
+                                    userObject.optString(
+                                        "name",
+                                        "未知作者"
+                                    ).ifBlank {
+                                        "未知作者"
+                                    }
+
+                                else -> "未知作者"
+                            }
 
                             coverUrl = data.optString(
                                 "cover",
@@ -494,7 +535,7 @@ fun ParsePage(sharedText: String) {
                                 HistoryStore.add(
                                     context,
                                     ParseHistoryEntry(
-                                        sourceUrl = douyinUrl,
+                                        sourceUrl = linkUrl,
                                         type = contentType,
                                         title = videoTitle,
                                         desc = fullText,
@@ -561,6 +602,7 @@ context.contentResolver
 }
 
 url = content
+txtFileName = getDisplayName(context, uri)
 recognized = false
 videoUrl = ""
 message = "TXT 文件读取成功，点击解析即可"
@@ -605,6 +647,7 @@ LaunchedEffect(sharedText) {
 if (sharedText.isNotBlank()) {
 
 url = sharedText
+txtFileName = ""
 recognized = false
 videoUrl = ""
 message = "已接收分享内容，请点击解析"
@@ -645,13 +688,14 @@ val clipText = clipboard?.primaryClip
 
 if (clipText.isNotBlank() &&
 clipText!= url &&
-extractDouyinUrl(clipText)!= null
+extractShareLink(clipText)!= null
 ) {
 
 url = clipText
+txtFileName = ""
 recognized = false
 videoUrl = ""
-message = "已自动识别剪贴板中的抖音链接，点击解析即可"
+message = "已自动识别剪贴板中的抖音/B站链接，点击解析即可"
 }
 }
 }
@@ -1411,6 +1455,7 @@ OutlinedTextField(
 value = url,
 onValueChange = {
 url = it
+txtFileName = ""
 message = "等待解析"
 recognized = false
 videoTitle = ""
@@ -1432,7 +1477,24 @@ showPlayer = false
 },
 modifier = Modifier.fillMaxWidth(),
 placeholder = {
-Text("粘贴抖音分享文案或视频链接")
+Text("粘贴抖音/B站分享文案或视频链接")
+},
+trailingIcon = {
+
+// 输入非空时在尾部显示清除按钮，只清输入框，不动结果页
+if (url.isNotEmpty()) {
+
+IconButton(
+onClick = {
+url = ""
+}
+) {
+Icon(
+imageVector = Icons.Filled.Clear,
+contentDescription = "清空输入"
+)
+}
+}
 },
 minLines = 3,
 shape = RoundedCornerShape(20.dp),
@@ -1469,6 +1531,7 @@ url = clipboard.primaryClip
 ?.toString()
 .orEmpty()
 
+txtFileName = ""
 recognized = false
 videoUrl = ""
 
@@ -1496,6 +1559,36 @@ Text("读取 TXT")
 
 Spacer(Modifier.height(8.dp))
 
+// 已读取 TXT 时显示文件名，可一键清除（连同填进输入框的内容）
+if (txtFileName.isNotBlank()) {
+
+Row(
+verticalAlignment = Alignment.CenterVertically
+) {
+
+Text(
+"TXT 文件：$txtFileName",
+color = AccentColorState.value,
+fontSize = 12.sp,
+modifier = Modifier.weight(1f)
+)
+
+TextButton(
+onClick = {
+txtFileName = ""
+url = ""
+recognized = false
+videoUrl = ""
+message = "已清除所选 TXT 文件"
+}
+) {
+Text("清除", fontSize = 12.sp)
+}
+}
+
+Spacer(Modifier.height(4.dp))
+}
+
 // 本地视频选择
 OutlinedButton(
 modifier = Modifier.fillMaxWidth(),
@@ -1512,11 +1605,26 @@ if (localFileName.isNotBlank()) {
 
 Spacer(Modifier.height(6.dp))
 
+Row(
+verticalAlignment = Alignment.CenterVertically
+) {
+
 Text(
 "本地文件：$localFileName",
 color = AccentColorState.value,
-fontSize = 12.sp
+fontSize = 12.sp,
+modifier = Modifier.weight(1f)
 )
+
+TextButton(
+onClick = {
+localFileName = ""
+message = "已清除本地视频选择"
+}
+) {
+Text("清除", fontSize = 12.sp)
+}
+}
 }
 
 Spacer(Modifier.height(16.dp))
@@ -1601,9 +1709,14 @@ Spacer(Modifier.height(8.dp))
 
 historyEntries.forEach { entry ->
 
+Row(
+modifier = Modifier.fillMaxWidth(),
+verticalAlignment = Alignment.CenterVertically
+) {
+
 Column(
 modifier = Modifier
-.fillMaxWidth()
+.weight(1f)
 .clickable {
 restoreFromHistory(entry)
 }
@@ -1634,6 +1747,22 @@ if (entry.type == "image") {
 color = TextMuted,
 fontSize = 12.sp
 )
+}
+
+// 单条删除（只删这一条，不影响其他记录）
+IconButton(
+onClick = {
+HistoryStore.remove(context, entry)
+historyEntries = HistoryStore.load(context)
+}
+) {
+Icon(
+imageVector = Icons.Filled.Clear,
+contentDescription = "删除这条历史",
+modifier = Modifier.size(18.dp),
+tint = TextMuted
+)
+}
 }
 
 Spacer(Modifier.height(10.dp))
@@ -1805,21 +1934,44 @@ modifier = Modifier
 }
 }
 
-// 提取抖音分享链接
-fun extractDouyinUrl(input: String): String? {
+// 提取受支持平台的分享链接并判定平台：返回 (链接, 平台标识)
+// 平台标识：douyin = 抖音，bilibili = B站
+fun extractShareLink(input: String): Pair<String, String>? {
 
-    val regex = Regex(
-        """https?://(?:v\.douyin\.com|www\.douyin\.com|douyin\.com)/[^\s，。]+""",
+    val douyinRegex = Regex(
+        """https?://(?:v\.douyin\.com|www\.douyin\.com|douyin\.com|www\.iesdouyin\.com|iesdouyin\.com)/[^\s，。]+""",
         RegexOption.IGNORE_CASE
     )
 
-    return regex.find(input)
+    val douyinUrl = douyinRegex.find(input)
         ?.value
         ?.trimEnd('.', ',', '，', '。', ')', '）')
+
+    if (douyinUrl != null) {
+        return douyinUrl to "douyin"
+    }
+
+    val bilibiliRegex = Regex(
+        """https?://(?:b23\.tv|www\.bilibili\.com/video|m\.bilibili\.com/video|bilibili\.com/video)/[^\s，。]+""",
+        RegexOption.IGNORE_CASE
+    )
+
+    val bilibiliUrl = bilibiliRegex.find(input)
+        ?.value
+        ?.trimEnd('.', ',', '，', '。', ')', '）')
+
+    if (bilibiliUrl != null) {
+        return bilibiliUrl to "bilibili"
+    }
+
+    return null
 }
 
-// 请求抖音解析接口
-suspend fun parseDouyin(inputUrl: String): JSONObject {
+// 请求解析接口（按平台选端点：抖音 /jiexi/douyin，B站 /jiexi/bilibili）
+suspend fun parseShare(
+    inputUrl: String,
+    platform: String
+): JSONObject {
 
     return withContext(Dispatchers.IO) {
 
@@ -1828,8 +1980,14 @@ suspend fun parseDouyin(inputUrl: String): JSONObject {
             "UTF-8"
         )
 
+        val endpoint = if (platform == "bilibili") {
+            "bilibili"
+        } else {
+            "douyin"
+        }
+
         val apiUrl =
-            "https://api.odysphere.tech/jiexi/douyin?url=$encodedUrl"
+            "https://api.odysphere.tech/jiexi/$endpoint?url=$encodedUrl"
 
         val connection = URL(apiUrl)
             .openConnection() as HttpURLConnection
