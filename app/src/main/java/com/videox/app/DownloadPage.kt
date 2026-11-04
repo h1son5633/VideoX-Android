@@ -9,6 +9,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.widget.Toast
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -564,6 +565,26 @@ fun imageFileExtension(imageUrl: String): String {
     }
 }
 
+// 按下载记录标题判类型（标题由上面各下载函数生成，规则固定；
+// DownloadRecord 里的标题已去掉 "VideoX - " 前缀）：
+// 含“（音乐：”→音乐（downloadMusic）；含“（动图 ”→动图（downloadLiveVideos）；
+// 含“（图 ”→图片（downloadImages）、含“（封面）”→图片（downloadCover）；
+// 其余无后缀标记的普通标题→视频（downloadVideo，也是判不准时的默认类）
+fun downloadCategory(title: String): String {
+
+    return when {
+
+        title.contains("（音乐：") -> "音乐"
+
+        title.contains("（动图 ") -> "动图"
+
+        title.contains("（图 ") ||
+                title.contains("（封面）") -> "图片"
+
+        else -> "视频"
+    }
+}
+
 // 下载记录页面
 @Composable
 fun DownloadPage() {
@@ -580,6 +601,19 @@ fun DownloadPage() {
 
     var pageMessage by remember {
         mutableStateOf("点击刷新查看下载任务")
+    }
+
+    // 下载记录类型筛选（全部/视频/图片/动图/音乐），仅内存状态
+    var typeFilter by remember {
+        mutableStateOf("全部")
+    }
+
+    val shownRecords = if (typeFilter == "全部") {
+        records
+    } else {
+        records.filter {
+            downloadCategory(it.title) == typeFilter
+        }
     }
 
     fun refreshDownloads() {
@@ -905,6 +939,31 @@ fun DownloadPage() {
 
         Spacer(Modifier.height(12.dp))
 
+        // 类型筛选 chip（只过滤显示，不影响记录本身）
+        Row(
+            modifier = Modifier.horizontalScroll(
+                rememberScrollState()
+            ),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+
+            listOf("全部", "视频", "图片", "动图", "音乐")
+                .forEach { category ->
+
+                    FilterChip(
+                        selected = typeFilter == category,
+                        onClick = {
+                            typeFilter = category
+                        },
+                        label = {
+                            Text(category, fontSize = 13.sp)
+                        }
+                    )
+                }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         if (records.isEmpty()) {
 
             RoundedPanel {
@@ -938,9 +997,20 @@ fun DownloadPage() {
                 }
             }
 
+        } else if (shownRecords.isEmpty()) {
+
+            RoundedPanel {
+
+                Text(
+                    "该类型暂无下载记录",
+                    color = TextMuted,
+                    fontSize = 13.sp
+                )
+            }
+
         } else {
 
-            records.forEach { record ->
+            shownRecords.forEach { record ->
 
                 RoundedPanel {
 
