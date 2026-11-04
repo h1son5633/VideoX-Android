@@ -67,6 +67,14 @@ fun ParsePage(sharedText: String) {
         mutableStateOf("")
     }
 
+    var contentType by remember {
+        mutableStateOf("video")
+    }
+
+    var imageUrls by remember {
+        mutableStateOf<List<String>>(emptyList())
+    }
+
     var localFileName by remember {
         mutableStateOf("")
     }
@@ -216,6 +224,8 @@ fun ParsePage(sharedText: String) {
                     author = ""
                     coverUrl = ""
                     videoUrl = ""
+                    contentType = "video"
+                    imageUrls = emptyList()
                 },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
@@ -339,6 +349,8 @@ fun ParsePage(sharedText: String) {
                             loading = true
                             recognized = false
                             videoUrl = ""
+                            contentType = "video"
+                            imageUrls = emptyList()
                             message = "正在请求解析接口..."
 
                             scope.launch {
@@ -382,14 +394,56 @@ fun ParsePage(sharedText: String) {
                                             ""
                                         )
 
-                                        recognized =
+                                        contentType = data.optString(
+                                            "type",
+                                            "video"
+                                        )
+
+                                        val imagesArray =
+                                            data.optJSONArray("images")
+
+                                        val parsedImages =
+                                            mutableListOf<String>()
+
+                                        if (imagesArray != null) {
+
+                                            for (i in 0 until imagesArray.length()) {
+
+                                                val img = imagesArray
+                                                    .optString(i, "")
+
+                                                if (img.startsWith("http://") ||
+                                                    img.startsWith("https://")
+                                                ) {
+                                                    parsedImages.add(img)
+                                                }
+                                            }
+                                        }
+
+                                        imageUrls = parsedImages
+
+                                        val hasVideo =
                                             videoUrl.startsWith("http://") ||
                                             videoUrl.startsWith("https://")
 
-                                        message = if (recognized) {
-                                            "解析成功，可以下载视频"
-                                        } else {
-                                            "解析成功，但没有获取到有效的视频地址"
+                                        val hasImages =
+                                            parsedImages.isNotEmpty()
+
+                                        recognized = hasVideo || hasImages
+
+                                        message = when {
+
+                                            hasVideo ->
+                                                "解析成功，可以下载视频"
+
+                                            contentType == "image" && hasImages ->
+                                                "解析成功，这是图文图集，共 ${parsedImages.size} 张图片"
+
+                                            hasImages ->
+                                                "解析成功，共 ${parsedImages.size} 张图片可下载"
+
+                                            else ->
+                                                "解析成功，但没有获取到可下载的内容"
                                         }
 
                                     } else {
@@ -468,19 +522,11 @@ fun ParsePage(sharedText: String) {
 
                 Spacer(Modifier.height(14.dp))
 
-                GreenButton(
-                    text = "下载视频",
-                    onClick = {
+                if (videoUrl.isNotBlank()) {
 
-                        if (videoUrl.isBlank()) {
-
-                            Toast.makeText(
-                                context,
-                                "视频地址为空，请重新解析",
-                                Toast.LENGTH_LONG
-                            ).show()
-
-                        } else {
+                    GreenButton(
+                        text = "下载视频",
+                        onClick = {
 
                             downloadVideo(
                                 context = context,
@@ -488,13 +534,35 @@ fun ParsePage(sharedText: String) {
                                 title = videoTitle
                             )
                         }
-                    }
-                )
+                    )
+
+                } else if (imageUrls.isNotEmpty()) {
+
+                    Text(
+                        "图文图集 · 共 ${imageUrls.size} 张图片",
+                        color = TextMain,
+                        fontSize = 14.sp
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    GreenButton(
+                        text = "下载全部图片（${imageUrls.size} 张）",
+                        onClick = {
+
+                            downloadImages(
+                                context = context,
+                                imageUrls = imageUrls,
+                                title = videoTitle
+                            )
+                        }
+                    )
+                }
 
             } else {
 
                 Text(
-                    "解析后将在这里显示视频标题和下载入口",
+                    "解析后将在这里显示标题和下载入口",
                     color = TextMuted,
                     fontSize = 13.sp
                 )
