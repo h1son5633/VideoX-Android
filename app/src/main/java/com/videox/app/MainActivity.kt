@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
@@ -23,6 +24,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -249,6 +251,27 @@ fun VideoXApp(sharedText: String) {
                 )
             }
         }
+
+        // 启动自动检查更新：有新版就弹窗（每次冷启动查一次，失败静默）
+        val updateContext = LocalContext.current
+
+        var pendingUpdate by remember {
+            mutableStateOf<UpdateInfo?>(null)
+        }
+
+        LaunchedEffect(Unit) {
+            pendingUpdate = checkForUpdate(updateContext)
+        }
+
+        pendingUpdate?.let { info ->
+
+            UpdateDialog(
+                info = info,
+                onDismiss = {
+                    pendingUpdate = null
+                }
+            )
+        }
     }
 }
 
@@ -405,7 +428,14 @@ fun BottomNavigationBar(
                             },
                             RoundedCornerShape(percent = 50)
                         )
-                        .clickable {
+                        // 裁成胶囊形作保险，并关掉水波纹：点击时不画任何高亮
+                        .clip(RoundedCornerShape(percent = 50))
+                        .clickable(
+                            indication = null,
+                            interactionSource = remember {
+                                MutableInteractionSource()
+                            }
+                        ) {
                             select(page)
                         },
                     contentAlignment = Alignment.Center
@@ -551,7 +581,14 @@ fun NavigationItem(
     Box(
         modifier = modifier
             .fillMaxHeight()
-            .clickable {
+            // 裁成胶囊形作保险，并关掉水波纹：点击时不画任何高亮
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(
+                indication = null,
+                interactionSource = remember {
+                    MutableInteractionSource()
+                }
+            ) {
                 onClick()
             },
         contentAlignment = Alignment.Center
