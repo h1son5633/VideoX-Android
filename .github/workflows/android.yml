@@ -38,24 +38,36 @@ jobs:
       - name: Install Android SDK
         run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Decode signing keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/videox-release.p12
+
       - name: Build APK
-        run: gradle assembleDebug --stacktrace --info
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/videox-release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --stacktrace --info
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VideoX-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: VideoX-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
       - name: Publish APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: VideoX v1.1.1（Build #${{ github.run_number }}）
+          name: VideoX v1.2.0（Build #${{ github.run_number }}）
           body: |
-            VideoX Android v1.1.1 修复版：新图标、滚动边缘渐隐、悬浮按钮实色化、切页流畅度优化。
+            VideoX Android v1.2.0：新增应用内检查更新（进 App 有新版会弹窗说明更新内容，可一键下载并覆盖安装）；本版起改用固定签名，首次装本版需先卸载旧版再装，之后即可直接覆盖更新。
+            - 新增 B 站链接解析：b23.tv / bilibili.com 链接可直接解析下载，与抖音共用结果页
+            - 解析页新增清空入口：输入框可一键清空，已选的 TXT / 本地视频也可清除
+            - 解析历史支持单条删除（原全部清空保留）
+            - 下载记录支持按类型筛选：全部 / 视频 / 图片 / 动图 / 音乐
             构建编号：${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/release/app-release.apk
           prerelease: false
           make_latest: true
