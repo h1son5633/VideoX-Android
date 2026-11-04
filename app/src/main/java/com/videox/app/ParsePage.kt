@@ -40,6 +40,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -547,7 +548,8 @@ fun ParsePage(sharedText: String) {
                                         musicTitle = musicTitle,
                                         musicAuthor = musicAuthor,
                                         musicUrl = musicUrl,
-                                        time = System.currentTimeMillis()
+                                        time = System.currentTimeMillis(),
+                                        platform = platform
                                     )
                                 )
 
@@ -1434,7 +1436,7 @@ fontSize = 32.sp
 )
 
 Text(
-"全平台媒体下载助手",
+"媒体下载助手",
 color = TextMuted,
 fontSize = 14.sp
 )
@@ -1476,8 +1478,12 @@ videoViewRef?.stopPlayback()
 showPlayer = false
 },
 modifier = Modifier.fillMaxWidth(),
+textStyle = TextStyle(fontSize = 15.sp),
 placeholder = {
-Text("粘贴抖音/B站分享文案或视频链接")
+Text(
+"粘贴抖音/B站分享文案或视频链接",
+fontSize = 14.sp
+)
 },
 trailingIcon = {
 
@@ -1508,6 +1514,18 @@ unfocusedPlaceholderColor = TextMuted,
 cursorColor = AccentColorState.value
 )
 )
+
+// 解析前验链接：输入非空但识别不到支持的链接时，即时红字提醒（空输入不提醒）
+if (url.isNotBlank() && extractShareLink(url) == null) {
+
+Spacer(Modifier.height(6.dp))
+
+Text(
+"没识别到支持的链接（抖音/B站）",
+color = Color(0xFFD32F2F),
+fontSize = 12.sp
+)
+}
 
 Spacer(Modifier.height(12.dp))
 
@@ -1722,6 +1740,36 @@ restoreFromHistory(entry)
 }
 ) {
 
+Row(
+verticalAlignment = Alignment.CenterVertically
+) {
+
+// 平台小标签（抖音 / B站）
+Box(
+modifier = Modifier
+.background(
+AccentColorState.value.copy(alpha = 0.16f),
+RoundedCornerShape(6.dp)
+)
+.padding(
+horizontal = 6.dp,
+vertical = 2.dp
+)
+) {
+
+Text(
+if (entry.platform == "bilibili") {
+"B站"
+} else {
+"抖音"
+},
+color = AccentColorState.value,
+fontSize = 10.sp
+)
+}
+
+Spacer(Modifier.width(8.dp))
+
 Text(
 (if (entry.type == "image") {
 ""
@@ -1730,8 +1778,10 @@ Text(
 }) + entry.title.ifBlank { "无标题"},
 color = TextMain,
 fontSize = 14.sp,
-maxLines = 2
+maxLines = 2,
+modifier = Modifier.weight(1f)
 )
+}
 
 Text(
 SimpleDateFormat(

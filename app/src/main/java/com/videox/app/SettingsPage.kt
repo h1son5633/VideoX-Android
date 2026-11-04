@@ -3,6 +3,8 @@ package com.videox.app
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
 
@@ -51,6 +53,11 @@ fun SettingsPage() {
     // 手动“检查更新”命中的新版本（非空时弹更新窗）
     var manualUpdate by remember {
         mutableStateOf<UpdateInfo?>(null)
+    }
+
+    // 设置二级页：""=主页，"storage"=储存，"about"=关于
+    var subPage by remember {
+        mutableStateOf("")
     }
 
     var autoClipboard by remember {
@@ -184,6 +191,24 @@ fun SettingsPage() {
         )
 
         Spacer(Modifier.height(20.dp))
+
+        if (subPage != "") {
+
+            SubPageHeader(
+                title = if (subPage == "storage") {
+                    "储存"
+                } else {
+                    "关于"
+                },
+                onBack = {
+                    subPage = ""
+                }
+            )
+
+            Spacer(Modifier.height(16.dp))
+        }
+
+        if (subPage == "") {
 
         RoundedPanel {
 
@@ -437,6 +462,84 @@ fun SettingsPage() {
 
         Spacer(Modifier.height(16.dp))
 
+        // 二级页入口（储存 / 关于）
+        RoundedPanel {
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        subPage = "storage"
+                    }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Column(Modifier.weight(1f)) {
+
+                    Text(
+                        "储存",
+                        color = TextMain,
+                        fontSize = 15.sp
+                    )
+
+                    Spacer(Modifier.height(2.dp))
+
+                    Text(
+                        "下载位置、文件夹路径、缓存与占用",
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Text(
+                    "\u203a",
+                    color = TextMuted,
+                    fontSize = 20.sp
+                )
+            }
+
+            Divider(color = Color(0xFF39443C))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        subPage = "about"
+                    }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Column(Modifier.weight(1f)) {
+
+                    Text(
+                        "关于",
+                        color = TextMain,
+                        fontSize = 15.sp
+                    )
+
+                    Spacer(Modifier.height(2.dp))
+
+                    Text(
+                        "版本、检查更新、免责声明、仓库地址",
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+
+                Text(
+                    "\u203a",
+                    color = TextMuted,
+                    fontSize = 20.sp
+                )
+            }
+        }
+
+        } // 主页内容（主题/底栏/入口）结束
+
+        if (subPage == "storage") {
+
         RoundedPanel {
 
             Text(
@@ -657,7 +760,11 @@ fun SettingsPage() {
             }
         }
 
+        } // 储存二级页结束
+
         Spacer(Modifier.height(16.dp))
+
+        if (subPage == "about") {
 
         RoundedPanel {
 
@@ -710,7 +817,59 @@ fun SettingsPage() {
             ) {
                 Text("检查更新")
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            Divider(color = Color(0xFF39443C))
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                "免责声明",
+                color = TextMain,
+                fontSize = 14.sp
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                "本应用仅供学习交流与技术研究使用。应用所解析、下载的内容，版权归原作者及所属平台所有；下载的内容请在 24 小时内删除，不得用于任何商业用途。因使用本应用产生的任何问题，由使用者自行承担。",
+                color = TextMuted,
+                fontSize = 12.sp
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            Divider(color = Color(0xFF39443C))
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                "GitHub 仓库",
+                color = TextMain,
+                fontSize = 14.sp
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                "github.com/h2587145633-lgtm/VideoX-Android",
+                color = AccentColorState.value,
+                fontSize = 13.sp,
+                modifier = Modifier.clickable {
+                    context.startActivity(
+                        Intent(
+                            Intent.ACTION_VIEW,
+                            Uri.parse(
+                                "https://github.com/h2587145633-lgtm/VideoX-Android"
+                            )
+                        )
+                    )
+                }
+            )
         }
+
+        } // 关于二级页结束
 
         // 手动检查更新命中的弹窗
         manualUpdate?.let { info ->
@@ -724,6 +883,39 @@ fun SettingsPage() {
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+// 二级页顶部返回行（“‹ 标题”，整行可点返回设置主页）
+@Composable
+fun SubPageHeader(
+    title: String,
+    onBack: () -> Unit
+) {
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                onBack()
+            }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+
+        Text(
+            "\u2039",
+            color = AccentColorState.value,
+            fontSize = 24.sp
+        )
+
+        Spacer(Modifier.width(6.dp))
+
+        Text(
+            title,
+            color = TextMain,
+            fontSize = 20.sp
+        )
     }
 }
 

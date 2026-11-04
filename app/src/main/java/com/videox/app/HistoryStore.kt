@@ -19,7 +19,9 @@ data class ParseHistoryEntry(
     val musicTitle: String,
     val musicAuthor: String,
     val musicUrl: String,
-    val time: Long
+    val time: Long,
+    // 来源平台："douyin" / "bilibili"（旧记录缺此字段时按链接推断）
+    val platform: String = "douyin"
 )
 
 // 解析历史的持久化存储（SharedPreferences 里存一段 JSON 数组）
@@ -93,7 +95,13 @@ object HistoryStore {
                         musicTitle = obj.optString("musicTitle", ""),
                         musicAuthor = obj.optString("musicAuthor", ""),
                         musicUrl = obj.optString("musicUrl", ""),
-                        time = obj.optLong("time", 0L)
+                        time = obj.optLong("time", 0L),
+                        platform = obj.optString("platform", "")
+                            .ifBlank {
+                                inferPlatform(
+                                    obj.optString("sourceUrl", "")
+                                )
+                            }
                     )
                 )
             }
@@ -103,6 +111,19 @@ object HistoryStore {
         } catch (e: Exception) {
 
             emptyList()
+        }
+    }
+
+    // 旧记录没有 platform 字段时，按来源链接域名推断平台
+    fun inferPlatform(sourceUrl: String): String {
+
+        return if (
+            sourceUrl.contains("b23.tv") ||
+            sourceUrl.contains("bilibili")
+        ) {
+            "bilibili"
+        } else {
+            "douyin"
         }
     }
 
@@ -167,6 +188,7 @@ object HistoryStore {
             obj.put("musicAuthor", entry.musicAuthor)
             obj.put("musicUrl", entry.musicUrl)
             obj.put("time", entry.time)
+            obj.put("platform", entry.platform)
 
             array.put(obj)
         }
