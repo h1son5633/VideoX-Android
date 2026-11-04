@@ -15,6 +15,7 @@ data class ParseHistoryEntry(
     val cover: String,
     val videoUrl: String,
     val images: List<String>,
+    val liveVideos: List<String>,
     val musicTitle: String,
     val musicAuthor: String,
     val musicUrl: String,
@@ -68,6 +69,16 @@ object HistoryStore {
                     }
                 }
 
+                val liveArray = obj.optJSONArray("liveVideos")
+                val liveVideos = mutableListOf<String>()
+
+                if (liveArray != null) {
+
+                    for (j in 0 until liveArray.length()) {
+                        liveVideos.add(liveArray.optString(j, ""))
+                    }
+                }
+
                 result.add(
                     ParseHistoryEntry(
                         sourceUrl = obj.optString("sourceUrl", ""),
@@ -78,6 +89,7 @@ object HistoryStore {
                         cover = obj.optString("cover", ""),
                         videoUrl = obj.optString("videoUrl", ""),
                         images = images,
+                        liveVideos = liveVideos,
                         musicTitle = obj.optString("musicTitle", ""),
                         musicAuthor = obj.optString("musicAuthor", ""),
                         musicUrl = obj.optString("musicUrl", ""),
@@ -125,6 +137,10 @@ object HistoryStore {
 
             entry.images.forEach { imagesArray.put(it) }
 
+            val liveArray = JSONArray()
+
+            entry.liveVideos.forEach { liveArray.put(it) }
+
             val obj = JSONObject()
 
             obj.put("sourceUrl", entry.sourceUrl)
@@ -135,6 +151,7 @@ object HistoryStore {
             obj.put("cover", entry.cover)
             obj.put("videoUrl", entry.videoUrl)
             obj.put("images", imagesArray)
+            obj.put("liveVideos", liveArray)
             obj.put("musicTitle", entry.musicTitle)
             obj.put("musicAuthor", entry.musicAuthor)
             obj.put("musicUrl", entry.musicUrl)

@@ -36,8 +36,16 @@ fun SettingsPage() {
 
     val context = LocalContext.current
 
-    var saveToGallery by remember {
-        mutableStateOf(SettingsStore.saveToGallery(context))
+    var videoDest by remember {
+        mutableStateOf(SettingsStore.destCode(context, "video"))
+    }
+
+    var imageDest by remember {
+        mutableStateOf(SettingsStore.destCode(context, "image"))
+    }
+
+    var musicDest by remember {
+        mutableStateOf(SettingsStore.destCode(context, "music"))
     }
 
     var autoClipboard by remember {
@@ -261,18 +269,6 @@ fun SettingsPage() {
             Spacer(Modifier.height(8.dp))
 
             SettingSwitch(
-                title = "默认保存到相册",
-                subtitle = "下载完成后保存到系统媒体库",
-                checked = saveToGallery,
-                onCheckedChange = {
-                    saveToGallery = it
-                    SettingsStore.setSaveToGallery(context, it)
-                }
-            )
-
-            Divider(color = Color(0xFF39443C))
-
-            SettingSwitch(
                 title = "自动识别剪贴板",
                 subtitle = "检测到分享链接时提示识别",
                 checked = autoClipboard,
@@ -300,6 +296,145 @@ fun SettingsPage() {
         RoundedPanel {
 
             Text(
+                "底栏外观",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+
+                TabPill(
+                    text = "有底板",
+                    selected = NavStyleState.value ==
+                            SettingsStore.NAV_STYLE_BOARD,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    NavStyleState.value =
+                        SettingsStore.NAV_STYLE_BOARD
+                    SettingsStore.setNavStyle(
+                        context,
+                        SettingsStore.NAV_STYLE_BOARD
+                    )
+                }
+
+                TabPill(
+                    text = "无底板悬浮",
+                    selected = NavStyleState.value ==
+                            SettingsStore.NAV_STYLE_FLOATING,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    NavStyleState.value =
+                        SettingsStore.NAV_STYLE_FLOATING
+                    SettingsStore.setNavStyle(
+                        context,
+                        SettingsStore.NAV_STYLE_FLOATING
+                    )
+                }
+
+                TabPill(
+                    text = "跟随系统",
+                    selected = NavStyleState.value ==
+                            SettingsStore.NAV_STYLE_SYSTEM,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    NavStyleState.value =
+                        SettingsStore.NAV_STYLE_SYSTEM
+                    SettingsStore.setNavStyle(
+                        context,
+                        SettingsStore.NAV_STYLE_SYSTEM
+                    )
+                }
+            }
+
+            if (NavStyleState.value ==
+                SettingsStore.NAV_STYLE_BOARD
+            ) {
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    "底板颜色",
+                    color = TextMuted,
+                    fontSize = 12.sp
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Row(
+                    horizontalArrangement =
+                        Arrangement.spacedBy(12.dp)
+                ) {
+
+                    listOf(
+                        Color(0xFF202820),
+                        Color(0xFF000000),
+                        Color(0xFF2B2B2B),
+                        Color(0xFF14532D),
+                        Color(0xFF1E3A5F),
+                        Color(0xFFF5F5F5)
+                    ).forEach { color ->
+
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(
+                                    color,
+                                    RoundedCornerShape(50.dp)
+                                )
+                                .border(
+                                    if (NavBoardColorState.value == color) {
+                                        3.dp
+                                    } else {
+                                        1.dp
+                                    },
+                                    if (NavBoardColorState.value == color) {
+                                        AccentColorState.value
+                                    } else {
+                                        Color.White.copy(alpha = 0.25f)
+                                    },
+                                    RoundedCornerShape(50.dp)
+                                )
+                                .clickable {
+                                    NavBoardColorState.value = color
+                                    SettingsStore.setNavBoardColor(
+                                        context,
+                                        color
+                                    )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+
+                            if (NavBoardColorState.value == color) {
+
+                                Text(
+                                    "✓",
+                                    color = AccentColorState.value,
+                                    fontSize = 16.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                "“跟随系统”时底板随系统深/浅模式变色；界面整体外观也会跟随系统。",
+                color = TextMuted,
+                fontSize = 12.sp
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        RoundedPanel {
+
+            Text(
                 "文件夹",
                 color = AccentColorState.value,
                 fontSize = 16.sp
@@ -307,38 +442,77 @@ fun SettingsPage() {
 
             Spacer(Modifier.height(8.dp))
 
-            val dataDirPath = context.filesDir.parentFile?.absolutePath
-                ?: context.filesDir.absolutePath
+            Text(
+                "下载位置（点右侧按钮更改，立即生效）",
+                color = TextMain,
+                fontSize = 14.sp
+            )
 
-            val downloadsRootPath = Environment
-                .getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_DOWNLOADS
+            DestChooserRow(
+                label = "视频",
+                code = videoDest,
+                options = listOf(
+                    SettingsStore.DEST_MEDIA,
+                    SettingsStore.DEST_DOWNLOADS,
+                    SettingsStore.DEST_DOWNLOADS_VIDEOX,
+                    SettingsStore.DEST_DCIM
                 )
-                .absolutePath
-
-            val videoDirPath = if (saveToGallery) {
-                Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_MOVIES
-                ).absolutePath + "/VideoX"
-            } else {
-                downloadsRootPath
+            ) { selected ->
+                videoDest = selected
+                SettingsStore.setDestCode(
+                    context,
+                    "video",
+                    selected
+                )
             }
 
-            val imageDirPath = if (saveToGallery) {
-                Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_PICTURES
-                ).absolutePath + "/VideoX"
-            } else {
-                downloadsRootPath
+            DestChooserRow(
+                label = "图片",
+                code = imageDest,
+                options = listOf(
+                    SettingsStore.DEST_MEDIA,
+                    SettingsStore.DEST_DOWNLOADS,
+                    SettingsStore.DEST_DOWNLOADS_VIDEOX,
+                    SettingsStore.DEST_DCIM
+                )
+            ) { selected ->
+                imageDest = selected
+                SettingsStore.setDestCode(
+                    context,
+                    "image",
+                    selected
+                )
             }
 
-            val musicDirPath = if (saveToGallery) {
-                Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_MUSIC
-                ).absolutePath + "/VideoX"
-            } else {
-                downloadsRootPath
+            DestChooserRow(
+                label = "音乐",
+                code = musicDest,
+                options = listOf(
+                    SettingsStore.DEST_MEDIA,
+                    SettingsStore.DEST_DOWNLOADS,
+                    SettingsStore.DEST_DOWNLOADS_VIDEOX
+                )
+            ) { selected ->
+                musicDest = selected
+                SettingsStore.setDestCode(
+                    context,
+                    "music",
+                    selected
+                )
             }
+
+            Divider(color = Color(0xFF39443C))
+
+            val dataDirPath = SettingsStore.dataDirPath(context)
+
+            val videoDirPath =
+                SettingsStore.destDisplayPath(context, "video")
+
+            val imageDirPath =
+                SettingsStore.destDisplayPath(context, "image")
+
+            val musicDirPath =
+                SettingsStore.destDisplayPath(context, "music")
 
             FolderRow(
                 label = "App 数据文件夹",
@@ -381,7 +555,7 @@ fun SettingsPage() {
             Spacer(Modifier.height(4.dp))
 
             Text(
-                "后三个保存位置跟着“默认保存到相册”开关走：开 → 相册里的 VideoX 文件夹；关 → 下载目录",
+                "上面选的位置就是实际下载位置；原来的“保存到相册”开关已升级为这里的逐类选择，旧设置会自动沿用。",
                 color = TextMuted,
                 fontSize = 12.sp
             )
@@ -547,6 +721,86 @@ fun SettingSwitch(
                 checkedTrackColor = Color(0xFF385B46)
             )
         )
+    }
+}
+
+// 下载位置编码的显示名
+fun destCodeLabel(code: Int): String {
+
+    return when (code) {
+
+        SettingsStore.DEST_DOWNLOADS ->
+            "下载目录"
+
+        SettingsStore.DEST_DOWNLOADS_VIDEOX ->
+            "下载目录 / VideoX"
+
+        SettingsStore.DEST_DCIM ->
+            "DCIM / VideoX"
+
+        else ->
+            "媒体库 / VideoX"
+    }
+}
+
+// 下载位置选择行（名称 + 当前选项按钮 + 下拉菜单）
+@Composable
+fun DestChooserRow(
+    label: String,
+    code: Int,
+    options: List<Int>,
+    onSelect: (Int) -> Unit
+) {
+
+    var expanded by remember {
+        mutableStateOf(false)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+
+        Text(
+            label,
+            color = TextMain,
+            fontSize = 14.sp,
+            modifier = Modifier.weight(1f)
+        )
+
+        Box {
+
+            OutlinedButton(
+                onClick = {
+                    expanded = true
+                }
+            ) {
+                Text(destCodeLabel(code) + " ▾")
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = {
+                    expanded = false
+                }
+            ) {
+
+                options.forEach { option ->
+
+                    DropdownMenuItem(
+                        text = {
+                            Text(destCodeLabel(option))
+                        },
+                        onClick = {
+                            expanded = false
+                            onSelect(option)
+                        }
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -14,6 +14,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -29,16 +33,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 
 import kotlinx.coroutines.Dispatchers
@@ -55,7 +60,8 @@ import java.util.Date
 import java.util.Locale
 
 // 带请求头的图片加载：抖音图片 CDN 对缺 Referer 的请求更容易失败，统一带上
-// 与下载时用的请求头保持一致；加载失败会回调 onError 供界面提示重试
+// 与下载时用的请求头保持一致；加载中显示骨架屏微光占位；
+// 加载失败会回调 onError 供界面提示重试
 @Composable
 fun AuthedAsyncImage(
     url: String,
@@ -80,16 +86,47 @@ fun AuthedAsyncImage(
             .build()
     }
 
-    AsyncImage(
+    val skeletonTransition = rememberInfiniteTransition(
+        label = "image_skeleton"
+    )
+
+    val skeletonAlpha by skeletonTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "image_skeleton_alpha"
+    )
+
+    SubcomposeAsyncImage(
         model = request,
         contentDescription = contentDescription,
         contentScale = contentScale,
-        placeholder = ColorPainter(Color(0xFF2A332C)),
-        error = ColorPainter(Color(0xFF2A332C)),
-        onError = {
-            onError()
+        modifier = modifier,
+        loading = {
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        SurfaceInner.copy(alpha = skeletonAlpha)
+                    )
+            )
         },
-        modifier = modifier
+        error = {
+
+            SideEffect {
+                onError()
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF2A332C))
+            )
+        }
     )
 }
 
@@ -137,6 +174,11 @@ fun ParsePage(sharedText: String) {
     }
 
     var imageUrls by remember {
+        mutableStateOf<List<String>>(emptyList())
+    }
+
+    // 与 imageUrls 一一对应：该图是动图时为它的视频直链，否则为空串
+    var liveVideoUrls by remember {
         mutableStateOf<List<String>>(emptyList())
     }
 
@@ -190,6 +232,7 @@ fun ParsePage(sharedText: String) {
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     var historyEntries by remember {
         mutableStateOf<List<ParseHistoryEntry>>(emptyList())
@@ -206,6 +249,10 @@ fun ParsePage(sharedText: String) {
         contentType = entry.type
         videoUrl = entry.videoUrl
         imageUrls = entry.images
+        liveVideoUrls =
+            (entry.liveVideos +
+                    List(entry.images.size) { "" })
+                .take(entry.images.size)
         musicTitle = entry.musicTitle
         musicAuthor = entry.musicAuthor
         musicUrl = entry.musicUrl
@@ -249,6 +296,7 @@ fun ParsePage(sharedText: String) {
                 videoUrl = ""
                 contentType = "video"
                 imageUrls = emptyList()
+                liveVideoUrls = emptyList()
                 fullText = ""
                 musicTitle = ""
                 musicAuthor = ""
@@ -336,6 +384,57 @@ fun ParsePage(sharedText: String) {
 
                             imageUrls = parsedImages
 
+                            // 动图（实况照片）：live_photo 每项是
+                            // 静态图 + 一小段视频，按静态图地址配对
+                            val liveArray =
+                                data.optJSONArray("live_photo")
+
+                            val liveMap =
+                                mutableMapOf<String, String>()
+
+                            if (liveArray != null) {
+
+                                for (i in 0 until liveArray.length()) {
+
+                                    val item = liveArray
+                                        .optJSONObject(i)
+                                        ?: continue
+
+                                    val img = item.optString(
+                                        "image",
+                                        ""
+                                    )
+
+                                    val vid = item.optString(
+                                        "video",
+                                        ""
+                                    )
+
+                                    if (img.isNotBlank() &&
+                                        vid.startsWith("http")
+                                    ) {
+                                        liveMap[img] = vid
+                                    }
+                                }
+                            }
+
+                            if (liveMap.isNotEmpty()) {
+
+                                // 动图里有、图片列表里没有的补进来
+                                liveMap.keys.forEach { img ->
+
+                                    if (img !in parsedImages) {
+                                        parsedImages.add(img)
+                                    }
+                                }
+
+                                imageUrls = parsedImages
+
+                                liveVideoUrls = parsedImages.map {
+                                    liveMap[it] ?: ""
+                                }
+                            }
+
                             val musicObject =
                                 data.optJSONObject("music")
 
@@ -363,10 +462,17 @@ fun ParsePage(sharedText: String) {
 
                             recognized = hasVideo || hasImages
 
+                            val liveCount = liveVideoUrls.count {
+                                it.isNotBlank()
+                            }
+
                             message = when {
 
                                 hasVideo ->
                                     "解析成功，可以下载视频"
+
+                                liveCount > 0 ->
+                                    "解析成功，动图作品：共 ${parsedImages.size} 张，其中 $liveCount 张是动图"
 
                                 contentType == "image" && hasImages ->
                                     "解析成功，这是图文图集，共 ${parsedImages.size} 张图片"
@@ -380,6 +486,10 @@ fun ParsePage(sharedText: String) {
 
                             if (recognized) {
 
+                                haptic.performHapticFeedback(
+                                    HapticFeedbackType.LongPress
+                                )
+
                                 HistoryStore.add(
                                     context,
                                     ParseHistoryEntry(
@@ -391,6 +501,7 @@ fun ParsePage(sharedText: String) {
                                         cover = coverUrl,
                                         videoUrl = videoUrl,
                                         images = parsedImages,
+                                        liveVideos = liveVideoUrls,
                                         musicTitle = musicTitle,
                                         musicAuthor = musicAuthor,
                                         musicUrl = musicUrl,
@@ -774,6 +885,7 @@ contentScale = ContentScale.Crop,
 modifier = Modifier
 .fillMaxWidth()
 .aspectRatio(16f / 9f)
+.clip(RoundedCornerShape(12.dp))
 .background(Color(0xFF2A332C))
 .clickable {
 showPlayer = true
@@ -836,7 +948,11 @@ Text("保存封面")
 Spacer(Modifier.height(14.dp))
 
 Text(
-"共 ${imageUrls.size} 张 · 点图看大图，点右上角圆圈勾选",
+if (liveVideoUrls.any { it.isNotBlank() }) {
+"共 ${imageUrls.size} 张（${liveVideoUrls.count { it.isNotBlank() }} 张动图）· 点图看大图，点右上角圆圈勾选"
+} else {
+"共 ${imageUrls.size} 张 · 点图看大图，点右上角圆圈勾选"
+},
 color = TextMuted,
 fontSize = 12.sp
 )
@@ -857,6 +973,7 @@ Box(
 modifier = Modifier
 .weight(1f)
 .aspectRatio(1f)
+.clip(RoundedCornerShape(12.dp))
 .background(Color(0xFF2A332C))
 .clickable {
 
@@ -900,6 +1017,33 @@ modifier = Modifier
 )
 }
 
+// 动图标记（左上角小角标）
+if (liveVideoUrls.getOrNull(index)
+?.isNotBlank() == true
+) {
+
+Box(
+modifier = Modifier
+.align(Alignment.TopStart)
+.padding(6.dp)
+.background(
+Color.Black.copy(alpha = 0.55f),
+RoundedCornerShape(6.dp)
+)
+.padding(
+horizontal = 6.dp,
+vertical = 2.dp
+)
+) {
+
+Text(
+"动图",
+color = Color.White,
+fontSize = 10.sp
+)
+}
+}
+
 // 右上角勾选圈（常显）
 Box(
 modifier = Modifier
@@ -936,7 +1080,78 @@ fontSize = 14.sp
 }
 }
 
-// 底部“保存本图”条
+// 底部保存条：普通图是“保存本图”；动图左右各半，
+// 左存静态图、右存动图（视频部分）
+if (liveVideoUrls.getOrNull(index)
+?.isNotBlank() == true
+) {
+
+Row(
+modifier = Modifier
+.align(Alignment.BottomCenter)
+.fillMaxWidth()
+) {
+
+Box(
+modifier = Modifier
+.weight(1f)
+.background(
+Color.Black.copy(alpha = 0.45f)
+)
+.clickable {
+
+downloadImages(
+context = context,
+imageUrls = imageUrls,
+title = videoTitle,
+onlyIndices = setOf(index)
+)
+}
+.padding(vertical = 6.dp),
+contentAlignment = Alignment.Center
+) {
+
+Text(
+"静态图",
+color = Color.White,
+fontSize = 12.sp
+)
+}
+
+Box(
+modifier = Modifier
+.weight(1f)
+.background(
+AccentColorState.value.copy(
+alpha = 0.75f
+)
+)
+.clickable {
+
+downloadLiveVideos(
+context = context,
+items = listOf(
+index to
+liveVideoUrls[index]
+),
+title = videoTitle,
+total = imageUrls.size
+)
+}
+.padding(vertical = 6.dp),
+contentAlignment = Alignment.Center
+) {
+
+Text(
+"保存动图",
+color = Color.White,
+fontSize = 12.sp
+)
+}
+}
+
+} else {
+
 Box(
 modifier = Modifier
 .align(Alignment.BottomCenter)
@@ -962,6 +1177,7 @@ Text(
 color = Color.White,
 fontSize = 12.sp
 )
+}
 }
 }
 }
@@ -1088,12 +1304,55 @@ Spacer(Modifier.width(8.dp))
 Button(
 onClick = {
 
+if (selectedImages.isEmpty()) {
+
+// 复用 downloadImages 的未勾选提示
 downloadImages(
 context = context,
 imageUrls = imageUrls,
 title = videoTitle,
-onlyIndices = selectedImages
+onlyIndices = emptySet()
 )
+
+} else {
+
+// 勾选里分开处理：普通图批量下图片，
+// 动图下它们的视频部分
+val stillSelected = selectedImages
+.filter {
+liveVideoUrls.getOrNull(it)
+.isNullOrBlank()
+}
+.toSet()
+
+val liveSelected = selectedImages
+.filter {
+!liveVideoUrls.getOrNull(it)
+.isNullOrBlank()
+}
+
+if (stillSelected.isNotEmpty()) {
+
+downloadImages(
+context = context,
+imageUrls = imageUrls,
+title = videoTitle,
+onlyIndices = stillSelected
+)
+}
+
+if (liveSelected.isNotEmpty()) {
+
+downloadLiveVideos(
+context = context,
+items = liveSelected.map {
+it to liveVideoUrls[it]
+},
+title = videoTitle,
+total = imageUrls.size
+)
+}
+}
 },
 modifier = Modifier
 .weight(1f)
@@ -1160,6 +1419,7 @@ coverUrl = ""
 videoUrl = ""
 contentType = "video"
 imageUrls = emptyList()
+liveVideoUrls = emptyList()
 musicTitle = ""
 musicAuthor = ""
 musicUrl = ""
@@ -1285,12 +1545,34 @@ fontSize = 14.sp
 )
 }
 
-if (historyEntries.isNotEmpty()) {
-
 Spacer(Modifier.height(18.dp))
 
-// 解析历史
+// 解析历史（没有记录时显示空状态）
 RoundedPanel {
+
+if (historyEntries.isEmpty()) {
+
+Text(
+"解析历史",
+color = TextMain,
+fontSize = 18.sp
+)
+
+Spacer(Modifier.height(8.dp))
+
+Text(
+"暂无解析历史",
+color = TextMuted,
+fontSize = 13.sp
+)
+
+Text(
+"解析成功的内容会自动存到这里，点一条就能恢复，不用重新解析",
+color = TextMuted,
+fontSize = 12.sp
+)
+
+} else {
 
 Row(
 verticalAlignment = Alignment.CenterVertically
@@ -1380,8 +1662,12 @@ Spacer(Modifier.height(16.dp))
 }
 }
 
-// 图集大图查看（点任意一张图打开，点画面关闭）
+// 图集大图查看（点任意一张图打开，点画面关闭；动图会循环播放它的视频部分）
 if (viewerIndex in imageUrls.indices) {
+
+val viewerLiveUrl = liveVideoUrls
+.getOrNull(viewerIndex)
+.orEmpty()
 
 Dialog(
 onDismissRequest = {
@@ -1398,6 +1684,105 @@ viewerIndex = -1
 }
 ) {
 
+if (viewerLiveUrl.isNotBlank()) {
+
+AndroidView(
+factory = { ctx ->
+
+VideoView(ctx).apply {
+
+if (Build.VERSION.SDK_INT >= 26) {
+
+setVideoURI(
+Uri.parse(viewerLiveUrl),
+mapOf(
+"User-Agent" to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
+"Referer" to "https://www.douyin.com/"
+)
+)
+
+} else {
+
+setVideoURI(Uri.parse(viewerLiveUrl))
+}
+
+setOnPreparedListener { player ->
+player.isLooping = true
+player.start()
+}
+}
+},
+onRelease = { view ->
+view.stopPlayback()
+},
+modifier = Modifier.fillMaxSize()
+)
+
+Text(
+"动图 ${viewerIndex + 1} / 共 ${imageUrls.size} 张",
+color = Color.White,
+fontSize = 13.sp,
+modifier = Modifier
+.align(Alignment.TopCenter)
+.padding(16.dp)
+)
+
+Row(
+modifier = Modifier
+.align(Alignment.BottomCenter)
+.padding(16.dp),
+horizontalArrangement =
+Arrangement.spacedBy(8.dp)
+) {
+
+Button(
+onClick = {
+
+downloadImages(
+context = context,
+imageUrls = imageUrls,
+title = videoTitle,
+onlyIndices = setOf(viewerIndex)
+)
+}
+) {
+Text("保存静态图")
+}
+
+Button(
+onClick = {
+
+val stillUrl = imageUrls[viewerIndex]
+
+scope.launch {
+
+Toast.makeText(
+context,
+"正在合成动态照片...",
+Toast.LENGTH_SHORT
+).show()
+
+val resultMessage = saveMotionPhoto(
+context = context,
+imageUrl = stillUrl,
+videoUrl = viewerLiveUrl,
+title = videoTitle
+)
+
+Toast.makeText(
+context,
+resultMessage,
+Toast.LENGTH_LONG
+).show()
+}
+}
+) {
+Text("存为动态照片")
+}
+}
+
+} else {
+
 AuthedAsyncImage(
 url = imageUrls[viewerIndex],
 contentDescription = "第 ${viewerIndex + 1} 张图片大图",
@@ -1413,6 +1798,7 @@ modifier = Modifier
 .align(Alignment.BottomCenter)
 .padding(16.dp)
 )
+}
 }
 }
 }

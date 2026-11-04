@@ -3,19 +3,53 @@ package com.videox.app
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.widget.Toast
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+// 保存成功时轻轻震动一下（失败不震）
+fun buzz(context: Context) {
+
+    try {
+
+        val vibrator = context.getSystemService(
+            Context.VIBRATOR_SERVICE
+        ) as? Vibrator ?: return
+
+        if (Build.VERSION.SDK_INT >= 26) {
+
+            vibrator.vibrate(
+                VibrationEffect.createOneShot(
+                    30,
+                    VibrationEffect.DEFAULT_AMPLITUDE
+                )
+            )
+
+        } else {
+
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(30)
+        }
+
+    } catch (e: Exception) {
+        // 震动失败不影响下载本身，忽略
+    }
+}
 
 // 下载记录数据
 data class DownloadRecord(
@@ -82,22 +116,14 @@ fun downloadVideo(
             )
         }
 
-        // 保存位置：开启“保存到相册”时存入公共视频目录（相册可见），
-        // 否则存入下载目录
-        if (SettingsStore.saveToGallery(context)) {
+        // 保存位置：读取设置里为视频选的位置
+        val (videoDirType, videoSubPrefix) =
+            SettingsStore.downloadDest(context, "video")
 
-            request.setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_MOVIES,
-                "VideoX/$fileName"
-            )
-
-        } else {
-
-            request.setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_DOWNLOADS,
-                fileName
-            )
-        }
+        request.setDestinationInExternalPublicDir(
+            videoDirType,
+            videoSubPrefix + fileName
+        )
 
         request.addRequestHeader(
             "User-Agent",
@@ -110,6 +136,8 @@ fun downloadVideo(
         )
 
         val downloadId = manager.enqueue(request)
+
+        buzz(context)
 
         Toast.makeText(
             context,
@@ -172,22 +200,14 @@ fun enqueueImageDownload(
             )
         }
 
-        // 保存位置：开启“保存到相册”时存入公共图片目录（相册可见），
-        // 否则存入下载目录
-        if (SettingsStore.saveToGallery(context)) {
+        // 保存位置：读取设置里为图片选的位置
+        val (imageDirType, imageSubPrefix) =
+            SettingsStore.downloadDest(context, "image")
 
-            request.setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_PICTURES,
-                "VideoX/$fileName"
-            )
-
-        } else {
-
-            request.setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_DOWNLOADS,
-                fileName
-            )
-        }
+        request.setDestinationInExternalPublicDir(
+            imageDirType,
+            imageSubPrefix + fileName
+        )
 
         request.addRequestHeader(
             "User-Agent",
@@ -269,6 +289,10 @@ fun downloadImages(
         }
     }
 
+    if (submitted > 0) {
+        buzz(context)
+    }
+
     Toast.makeText(
         context,
         if (submitted > 0) {
@@ -314,6 +338,10 @@ fun downloadCover(
         displayTitle = "VideoX - ${title.ifBlank { "抖音视频" }}（封面）",
         fileName = fileName
     )
+
+    if (ok) {
+        buzz(context)
+    }
 
     Toast.makeText(
         context,
@@ -382,22 +410,14 @@ fun downloadMusic(
             )
         }
 
-        // 保存位置：开启“保存到相册”时存入公共音乐目录，
-        // 否则存入下载目录
-        if (SettingsStore.saveToGallery(context)) {
+        // 保存位置：读取设置里为音乐选的位置
+        val (musicDirType, musicSubPrefix) =
+            SettingsStore.downloadDest(context, "music")
 
-            request.setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_MUSIC,
-                "VideoX/$fileName"
-            )
-
-        } else {
-
-            request.setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_DOWNLOADS,
-                fileName
-            )
-        }
+        request.setDestinationInExternalPublicDir(
+            musicDirType,
+            musicSubPrefix + fileName
+        )
 
         request.addRequestHeader(
             "User-Agent",
@@ -410,6 +430,8 @@ fun downloadMusic(
         )
 
         manager.enqueue(request)
+
+        buzz(context)
 
         Toast.makeText(
             context,
@@ -425,6 +447,106 @@ fun downloadMusic(
             Toast.LENGTH_LONG
         ).show()
     }
+}
+
+// 批量下载动图（实况照片）的视频部分：每张动图是一小段 MP4，
+// 存到与视频相同的位置，下载记录标题带“动图”字样；items 是 (序号, 视频直链)
+fun downloadLiveVideos(
+    context: Context,
+    items: List<Pair<Int, String>>,
+    title: String,
+    total: Int
+) {
+
+    if (items.isEmpty()) {
+        return
+    }
+
+    val manager = context.getSystemService(
+        Context.DOWNLOAD_SERVICE
+    ) as DownloadManager
+
+    val (dirType, subPrefix) =
+        SettingsStore.downloadDest(context, "video")
+
+    var submitted = 0
+
+    items.forEach { (index, videoUrl) ->
+
+        try {
+
+            val uri = Uri.parse(videoUrl)
+
+            if (
+                (uri.scheme != "http" && uri.scheme != "https") ||
+                uri.host.isNullOrBlank()
+            ) {
+                return@forEach
+            }
+
+            val fileName =
+                "VideoX_${System.currentTimeMillis()}_live_${index + 1}.mp4"
+
+            val request = DownloadManager.Request(uri)
+                .setTitle("VideoX - ${title.ifBlank { "抖音动图" }}（动图 ${index + 1}/$total）")
+                .setDescription("VideoX 正在下载动图")
+                .setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                )
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true)
+
+            if (SettingsStore.wifiOnly(context)) {
+
+                request.setAllowedNetworkTypes(
+                    DownloadManager.Request.NETWORK_WIFI
+                )
+
+            } else {
+
+                request.setAllowedNetworkTypes(
+                    DownloadManager.Request.NETWORK_WIFI or
+                            DownloadManager.Request.NETWORK_MOBILE
+                )
+            }
+
+            request.setDestinationInExternalPublicDir(
+                dirType,
+                subPrefix + fileName
+            )
+
+            request.addRequestHeader(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
+            )
+
+            request.addRequestHeader(
+                "Referer",
+                "https://www.douyin.com/"
+            )
+
+            manager.enqueue(request)
+
+            submitted++
+
+        } catch (e: Exception) {
+            // 单张失败不影响其余动图提交
+        }
+    }
+
+    if (submitted > 0) {
+        buzz(context)
+    }
+
+    Toast.makeText(
+        context,
+        if (submitted > 0) {
+            "已提交 $submitted 张动图下载"
+        } else {
+            "动图下载提交失败"
+        },
+        Toast.LENGTH_LONG
+    ).show()
 }
 
 // 根据图片直链判断文件扩展名（抖音图集直链多为 webp）
@@ -629,6 +751,84 @@ fun DownloadPage() {
         }
     }
 
+    // 清空已结束（成功/失败）的 VideoX 下载记录，进行中的保留
+    fun clearFinishedRecords() {
+
+        try {
+
+            val manager = context.getSystemService(
+                Context.DOWNLOAD_SERVICE
+            ) as DownloadManager
+
+            val cursor = manager.query(
+                DownloadManager.Query()
+            )
+
+            val ids = mutableListOf<Long>()
+
+            cursor?.use {
+
+                val titleIndex = it.getColumnIndex(
+                    DownloadManager.COLUMN_TITLE
+                )
+
+                val idIndex = it.getColumnIndex(
+                    DownloadManager.COLUMN_ID
+                )
+
+                val statusIndex = it.getColumnIndex(
+                    DownloadManager.COLUMN_STATUS
+                )
+
+                while (it.moveToNext()) {
+
+                    val title = it.getString(titleIndex).orEmpty()
+
+                    if (!title.startsWith("VideoX - ")) {
+                        continue
+                    }
+
+                    val statusCode = it.getInt(statusIndex)
+
+                    if (statusCode == DownloadManager.STATUS_SUCCESSFUL ||
+                        statusCode == DownloadManager.STATUS_FAILED
+                    ) {
+                        ids.add(it.getLong(idIndex))
+                    }
+                }
+            }
+
+            if (ids.isEmpty()) {
+
+                Toast.makeText(
+                    context,
+                    "没有可清空的已结束记录",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+            } else {
+
+                manager.remove(*ids.toLongArray())
+
+                Toast.makeText(
+                    context,
+                    "已清空 ${ids.size} 条下载记录",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                refreshDownloads()
+            }
+
+        } catch (e: Exception) {
+
+            Toast.makeText(
+                context,
+                "清空失败：${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     LaunchedEffect(Unit) {
         refreshDownloads()
     }
@@ -653,18 +853,47 @@ fun DownloadPage() {
 
         Spacer(Modifier.height(18.dp))
 
-        GreenButton(
-            text = if (loading) {
-                "正在刷新..."
-            } else {
-                "刷新下载记录"
-            },
-            onClick = {
-                if (!loading) {
-                    refreshDownloads()
-                }
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Button(
+                onClick = {
+                    if (!loading) {
+                        refreshDownloads()
+                    }
+                },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+                shape = RoundedCornerShape(18.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AccentColorState.value
+                )
+            ) {
+
+                Text(
+                    if (loading) {
+                        "正在刷新..."
+                    } else {
+                        "刷新下载记录"
+                    },
+                    color = Color(0xFF102017),
+                    fontSize = 16.sp
+                )
             }
-        )
+
+            Spacer(Modifier.width(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    clearFinishedRecords()
+                },
+                modifier = Modifier.height(52.dp)
+            ) {
+                Text("清空记录")
+            }
+        }
 
         Spacer(Modifier.height(12.dp))
 
@@ -680,19 +909,33 @@ fun DownloadPage() {
 
             RoundedPanel {
 
-                Text(
-                    "暂无下载任务",
-                    color = TextMain,
-                    fontSize = 17.sp
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
 
-                Spacer(Modifier.height(8.dp))
+                    Text(
+                        "↓",
+                        color = TextMuted,
+                        fontSize = 36.sp
+                    )
 
-                Text(
-                    "解析视频后点击下载，任务会显示在这里。",
-                    color = TextMuted,
-                    fontSize = 13.sp
-                )
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        "暂无下载任务",
+                        color = TextMain,
+                        fontSize = 17.sp
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        "解析视频后点击下载，任务会显示在这里。",
+                        color = TextMuted,
+                        fontSize = 13.sp
+                    )
+                }
             }
 
         } else {
