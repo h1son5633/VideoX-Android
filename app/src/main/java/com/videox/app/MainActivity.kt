@@ -619,7 +619,7 @@ suspend fun parseDouyin(inputUrl: String): JSONObject {
         )
 
         val apiUrl =
-            "http://api.xhus.cn/api/douyin?url=$encodedUrl"
+    "https://api.odysphere.tech/jiexi/douyin?url=$encodedUrl"
 
         val connection = URL(apiUrl)
             .openConnection() as HttpURLConnection
