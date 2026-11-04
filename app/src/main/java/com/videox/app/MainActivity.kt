@@ -23,6 +23,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -193,6 +194,7 @@ fun VideoXApp(sharedText: String) {
 
                 HorizontalPager(
                     state = pagerState,
+                    beyondViewportPageCount = 1,
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
 
@@ -213,6 +215,38 @@ fun VideoXApp(sharedText: String) {
                         }
                     }
                 }
+
+                // 上下边缘渐隐：内容滑到顶/底边时柔和淡出，
+                // 不会出现文字被硬生生切一半的割裂感（不拦截触摸）
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(26.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Bg,
+                                    Bg.copy(alpha = 0f)
+                                )
+                            )
+                        )
+                )
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(34.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Bg.copy(alpha = 0f),
+                                    Bg
+                                )
+                            )
+                        )
+                )
             }
         }
     }
@@ -356,10 +390,9 @@ fun BottomNavigationBar(
                         .background(
                             if (selected) {
                                 AccentColorState.value.copy(alpha = 0.30f)
-                            } else if (AppDarkState.value) {
-                                Color.White.copy(alpha = 0.07f)
                             } else {
-                                Color.Black.copy(alpha = 0.05f)
+                                // 未选中也用近实色小底，避免滚动内容透出显乱
+                                SurfaceGlass.copy(alpha = 0.95f)
                             },
                             RoundedCornerShape(percent = 50)
                         )
