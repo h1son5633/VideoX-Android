@@ -5,12 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import android.widget.Toast
 import android.widget.VideoView
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -230,15 +227,6 @@ fun ParsePage(sharedText: String) {
         mutableStateOf(0)
     }
 
-    var localFileName by remember {
-        mutableStateOf("")
-    }
-
-    // 已读取的 TXT 文件名（非空表示输入内容来自这个 TXT，可一键清除）
-    var txtFileName by remember {
-        mutableStateOf("")
-    }
-
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -290,7 +278,7 @@ fun ParsePage(sharedText: String) {
         when {
 
             url.isBlank() -> {
-                message = "请先粘贴链接或读取 TXT 文件"
+                message = "请先粘贴链接"
             }
 
             shareLink == null -> {
@@ -583,73 +571,12 @@ fun ParsePage(sharedText: String) {
         }
     }
 
-// TXT 文件选择器
-val txtPicker = rememberLauncherForActivityResult(
-ActivityResultContracts.OpenDocument()
-) { uri ->
-
-if (uri!= null) {
-
-scope.launch {
-
-try {
-
-val content = withContext(Dispatchers.IO) {
-
-context.contentResolver
-.openInputStream(uri)
-?.bufferedReader()
-?.use { it.readText()}
-?: throw Exception("无法读取文件")
-}
-
-url = content
-txtFileName = getDisplayName(context, uri)
-recognized = false
-videoUrl = ""
-message = "TXT 文件读取成功，点击解析即可"
-
-} catch (e: Exception) {
-
-message = "TXT 读取失败：${e.message}"
-}
-}
-}
-}
-
-// 本地视频选择器
-val videoPicker = rememberLauncherForActivityResult(
-ActivityResultContracts.OpenDocument()
-) { uri ->
-
-if (uri!= null) {
-
-try {
-
-localFileName = getDisplayName(context, uri)
-
-message = "已选择本地视频：$localFileName"
-
-Toast.makeText(
-context,
-"本地视频已选择",
-Toast.LENGTH_SHORT
-).show()
-
-} catch (e: Exception) {
-
-message = "读取视频信息失败：${e.message}"
-}
-}
-}
-
 // 接收其他应用分享的内容
 LaunchedEffect(sharedText) {
 
 if (sharedText.isNotBlank()) {
 
 url = sharedText
-txtFileName = ""
 recognized = false
 videoUrl = ""
 message = "已接收分享内容，请点击解析"
@@ -694,7 +621,6 @@ extractShareLink(clipText)!= null
 ) {
 
 url = clipText
-txtFileName = ""
 recognized = false
 videoUrl = ""
 message = "已自动识别剪贴板中的抖音/B站链接，点击解析即可"
@@ -1457,7 +1383,6 @@ OutlinedTextField(
 value = url,
 onValueChange = {
 url = it
-txtFileName = ""
 message = "等待解析"
 recognized = false
 videoTitle = ""
@@ -1529,13 +1454,16 @@ fontSize = 12.sp
 
 Spacer(Modifier.height(12.dp))
 
-// 粘贴和 TXT 按钮
+// 粘贴与开始解析并排一行
 Row(
 horizontalArrangement = Arrangement.spacedBy(8.dp)
 ) {
 
 Button(
-modifier = Modifier.weight(1f),
+modifier = Modifier
+.weight(1f)
+.height(52.dp),
+shape = RoundedCornerShape(18.dp),
 onClick = {
 
 val clipboard =
@@ -1549,7 +1477,6 @@ url = clipboard.primaryClip
 ?.toString()
 .orEmpty()
 
-txtFileName = ""
 recognized = false
 videoUrl = ""
 
@@ -1563,91 +1490,10 @@ message = if (url.isBlank()) {
 Text("粘贴")
 }
 
-Button(
-modifier = Modifier.weight(1f),
-onClick = {
-txtPicker.launch(
-arrayOf("text/plain", "text/*")
-)
-}
-) {
-Text("读取 TXT")
-}
-}
-
-Spacer(Modifier.height(8.dp))
-
-// 已读取 TXT 时显示文件名，可一键清除（连同填进输入框的内容）
-if (txtFileName.isNotBlank()) {
-
-Row(
-verticalAlignment = Alignment.CenterVertically
-) {
-
-Text(
-"TXT 文件：$txtFileName",
-color = AccentColorState.value,
-fontSize = 12.sp,
+Box(
 modifier = Modifier.weight(1f)
-)
-
-TextButton(
-onClick = {
-txtFileName = ""
-url = ""
-recognized = false
-videoUrl = ""
-message = "已清除所选 TXT 文件"
-}
-) {
-Text("清除", fontSize = 12.sp)
-}
-}
-
-Spacer(Modifier.height(4.dp))
-}
-
-// 本地视频选择
-OutlinedButton(
-modifier = Modifier.fillMaxWidth(),
-onClick = {
-videoPicker.launch(
-arrayOf("video/*")
-)
-}
-) {
-Text("选择本地视频")
-}
-
-if (localFileName.isNotBlank()) {
-
-Spacer(Modifier.height(6.dp))
-
-Row(
-verticalAlignment = Alignment.CenterVertically
 ) {
 
-Text(
-"本地文件：$localFileName",
-color = AccentColorState.value,
-fontSize = 12.sp,
-modifier = Modifier.weight(1f)
-)
-
-TextButton(
-onClick = {
-localFileName = ""
-message = "已清除本地视频选择"
-}
-) {
-Text("清除", fontSize = 12.sp)
-}
-}
-}
-
-Spacer(Modifier.height(16.dp))
-
-// 解析按钮
 GreenButton(
 text = if (loading) {
 "正在解析..."
@@ -1658,6 +1504,8 @@ onClick = {
 startParse()
 }
 )
+}
+}
 
 Spacer(Modifier.height(12.dp))
 
@@ -2098,37 +1946,6 @@ suspend fun parseShare(
             connection.disconnect()
         }
     }
-}
-
-// 获取本地文件名称
-fun getDisplayName(
-    context: Context,
-    uri: Uri
-): String {
-
-    var name = "未命名文件"
-
-    context.contentResolver.query(
-        uri,
-        arrayOf(OpenableColumns.DISPLAY_NAME),
-        null,
-        null,
-        null
-    )?.use { cursor ->
-
-        if (cursor.moveToFirst()) {
-
-            val index = cursor.getColumnIndex(
-                OpenableColumns.DISPLAY_NAME
-            )
-
-            if (index >= 0) {
-                name = cursor.getString(index) ?: name
-            }
-        }
-    }
-
-    return name
 }
 
 // 平台识别

@@ -853,7 +853,7 @@ fun SettingsPage() {
             Spacer(Modifier.height(6.dp))
 
             Text(
-                "github.com/h2587145633-lgtm/VideoX-Android",
+                "github.com/h1son5633/VideoX-Android",
                 color = AccentColorState.value,
                 fontSize = 13.sp,
                 modifier = Modifier.clickable {
@@ -861,7 +861,7 @@ fun SettingsPage() {
                         Intent(
                             Intent.ACTION_VIEW,
                             Uri.parse(
-                                "https://github.com/h2587145633-lgtm/VideoX-Android"
+                                "https://github.com/h1son5633/VideoX-Android"
                             )
                         )
                     )

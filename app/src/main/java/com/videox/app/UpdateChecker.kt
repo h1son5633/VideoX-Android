@@ -86,7 +86,7 @@ suspend fun checkForUpdate(context: Context): UpdateInfo? {
         try {
 
             val connection = URL(
-                "https://api.github.com/repos/h2587145633-lgtm/VideoX-Android/releases/latest"
+                "https://api.github.com/repos/h1son5633/VideoX-Android/releases/latest"
             ).openConnection() as HttpURLConnection
 
             try {
