@@ -12,8 +12,8 @@ android {
         applicationId = "com.videox.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 121
-        versionName = "1.2.1"
+        versionCode = 122
+        versionName = "1.2.2"
         // 底栏图标等新依赖让方法数超过单 dex 的 64K 上限，开启多 dex
         // （minSdk 23，系统原生支持，无需额外 multidex 库）
         multiDexEnabled = true
