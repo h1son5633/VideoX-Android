@@ -52,10 +52,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: VideoX Build #${{ github.run_number }}
+          name: VideoX v1.1.0（Build #${{ github.run_number }}）
           body: |
-            VideoX Android APK 自动构建版本。
+            VideoX Android v1.1.0 正式发行版。
             构建编号：${{ github.run_number }}
           files: app/build/outputs/apk/debug/app-debug.apk
-          prerelease: true
-          make_latest: false
+          prerelease: false
+          make_latest: true
