@@ -446,10 +446,17 @@ fun ParsePage(sharedText: String) {
                                             "抖音视频"
                                         }
 
-                                        author = data.optString(
-                                            "author",
-                                            "未知作者"
-                                        )
+val authorObject = data.optJSONObject("author")
+
+author = authorObject?.optString(
+    "name",
+    "未知作者"
+)?.ifBlank {
+    "未知作者"
+} ?: data.optString(
+    "author",
+    "未知作者"
+)
 
                                         coverUrl = data.optString(
                                             "cover",
