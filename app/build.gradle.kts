@@ -12,16 +12,40 @@ android {
         applicationId = "com.videox.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 111
-        versionName = "1.1.1"
+        versionCode = 120
+        versionName = "1.2.0"
         // 底栏图标等新依赖让方法数超过单 dex 的 64K 上限，开启多 dex
         // （minSdk 23，系统原生支持，无需额外 multidex 库）
         multiDexEnabled = true
     }
 
+    // 固定签名：钥匙路径与密码从环境变量读（CI 由 GitHub Secrets 注入）。
+    // 没有环境变量时（本地/未配置机密）不挂签名配置，保持原有行为。
+    val keystorePath = System.getenv("ANDROID_KEYSTORE_FILE")
+
+    signingConfigs {
+        if (keystorePath != null) {
+            create("fixed") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.getByName("fixed")
+            }
+        }
+        debug {
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.getByName("fixed")
+            }
         }
     }
 
