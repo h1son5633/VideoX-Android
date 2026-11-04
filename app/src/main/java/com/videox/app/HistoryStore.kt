@@ -117,6 +117,17 @@ object HistoryStore {
         save(context, current.take(MAX_ENTRIES))
     }
 
+    // 删除单条历史：来源链接 + 时间戳共同定位，避免误删同链接的不同记录
+    fun remove(context: Context, entry: ParseHistoryEntry) {
+
+        val current = load(context)
+            .filterNot {
+                it.sourceUrl == entry.sourceUrl && it.time == entry.time
+            }
+
+        save(context, current)
+    }
+
     fun clear(context: Context) {
 
         prefs(context).edit()
