@@ -1,5 +1,11 @@
 package com.videox.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Environment
+import android.widget.Toast
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +21,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+import coil.imageLoader
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+import java.io.File
 
 // 设置页面（所有选项都会持久化保存，并被实际功能读取）
 @Composable
@@ -32,6 +46,94 @@ fun SettingsPage() {
 
     var wifiOnly by remember {
         mutableStateOf(SettingsStore.wifiOnly(context))
+    }
+
+    val scope = rememberCoroutineScope()
+
+    var cacheSizeText by remember {
+        mutableStateOf("计算中…")
+    }
+
+    var downloadsSizeText by remember {
+        mutableStateOf("计算中…")
+    }
+
+    // 统计图片缓存和已下载文件的占用（IO 线程执行）
+    suspend fun computeSizes(): Pair<Long, Long> {
+
+        return withContext(Dispatchers.IO) {
+
+            val loader = context.imageLoader
+
+            val cache = (loader.memoryCache?.size?.toLong() ?: 0L) +
+                    (loader.diskCache?.size ?: 0L)
+
+            var downloads = 0L
+
+            listOf(
+                Environment.DIRECTORY_MOVIES,
+                Environment.DIRECTORY_PICTURES,
+                Environment.DIRECTORY_MUSIC
+            ).forEach { type ->
+
+                downloads += folderSize(
+                    File(
+                        Environment.getExternalStoragePublicDirectory(type),
+                        "VideoX"
+                    )
+                )
+            }
+
+            val downloadsRoot = Environment
+                .getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+
+            downloadsRoot.listFiles()?.forEach { file ->
+
+                if (file.isFile && file.name.startsWith("VideoX_")) {
+                    downloads += file.length()
+                }
+            }
+
+            cache to downloads
+        }
+    }
+
+    LaunchedEffect(Unit) {
+
+        val (cache, downloads) = computeSizes()
+
+        cacheSizeText = formatFileSize(cache)
+        downloadsSizeText = formatFileSize(downloads)
+    }
+
+    val versionName = remember {
+
+        try {
+            context.packageManager
+                .getPackageInfo(context.packageName, 0)
+                .versionName
+        } catch (e: Exception) {
+            null
+        }
+    } ?: "未知"
+
+    fun copyToClipboard(text: String) {
+
+        val clipboard = context.getSystemService(
+            Context.CLIPBOARD_SERVICE
+        ) as ClipboardManager
+
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("VideoX 路径", text)
+        )
+
+        Toast.makeText(
+            context,
+            "路径已复制",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     val themeColors = listOf(
@@ -198,6 +300,189 @@ fun SettingsPage() {
         RoundedPanel {
 
             Text(
+                "文件夹",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            val dataDirPath = context.filesDir.parentFile?.absolutePath
+                ?: context.filesDir.absolutePath
+
+            val downloadsRootPath = Environment
+                .getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS
+                )
+                .absolutePath
+
+            val videoDirPath = if (saveToGallery) {
+                Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_MOVIES
+                ).absolutePath + "/VideoX"
+            } else {
+                downloadsRootPath
+            }
+
+            val imageDirPath = if (saveToGallery) {
+                Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_PICTURES
+                ).absolutePath + "/VideoX"
+            } else {
+                downloadsRootPath
+            }
+
+            val musicDirPath = if (saveToGallery) {
+                Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_MUSIC
+                ).absolutePath + "/VideoX"
+            } else {
+                downloadsRootPath
+            }
+
+            FolderRow(
+                label = "App 数据文件夹",
+                path = dataDirPath,
+                onCopy = {
+                    copyToClipboard(dataDirPath)
+                }
+            )
+
+            Divider(color = Color(0xFF39443C))
+
+            FolderRow(
+                label = "视频保存文件夹",
+                path = videoDirPath,
+                onCopy = {
+                    copyToClipboard(videoDirPath)
+                }
+            )
+
+            Divider(color = Color(0xFF39443C))
+
+            FolderRow(
+                label = "图片保存文件夹",
+                path = imageDirPath,
+                onCopy = {
+                    copyToClipboard(imageDirPath)
+                }
+            )
+
+            Divider(color = Color(0xFF39443C))
+
+            FolderRow(
+                label = "音乐保存文件夹",
+                path = musicDirPath,
+                onCopy = {
+                    copyToClipboard(musicDirPath)
+                }
+            )
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                "后三个保存位置跟着“默认保存到相册”开关走：开 → 相册里的 VideoX 文件夹；关 → 下载目录",
+                color = TextMuted,
+                fontSize = 12.sp
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        RoundedPanel {
+
+            Text(
+                "存储空间",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Column(Modifier.weight(1f)) {
+
+                    Text(
+                        "图片缓存",
+                        color = TextMain,
+                        fontSize = 14.sp
+                    )
+
+                    Text(
+                        cacheSizeText,
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = {
+
+                        scope.launch {
+
+                            withContext(Dispatchers.IO) {
+
+                                context.imageLoader
+                                    .memoryCache?.clear()
+
+                                context.imageLoader
+                                    .diskCache?.clear()
+                            }
+
+                            val (cache, downloads) = computeSizes()
+
+                            cacheSizeText = formatFileSize(cache)
+                            downloadsSizeText = formatFileSize(downloads)
+
+                            Toast.makeText(
+                                context,
+                                "图片缓存已清除",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                ) {
+                    Text("清除")
+                }
+            }
+
+            Divider(color = Color(0xFF39443C))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Column(Modifier.weight(1f)) {
+
+                    Text(
+                        "下载文件占用",
+                        color = TextMain,
+                        fontSize = 14.sp
+                    )
+
+                    Text(
+                        downloadsSizeText,
+                        color = TextMuted,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        RoundedPanel {
+
+            Text(
                 "关于",
                 color = AccentColorState.value,
                 fontSize = 16.sp
@@ -211,7 +496,7 @@ fun SettingsPage() {
             )
 
             Text(
-                "版本 0.1.0 · 抖音解析测试版",
+                "版本 $versionName",
                 color = TextMuted,
                 fontSize = 13.sp
             )
@@ -263,4 +548,56 @@ fun SettingSwitch(
             )
         )
     }
+}
+
+// 文件夹路径行（名称 + 路径 + 复制按钮）
+@Composable
+fun FolderRow(
+    label: String,
+    path: String,
+    onCopy: () -> Unit
+) {
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+
+        Column(Modifier.weight(1f)) {
+
+            Text(
+                label,
+                color = TextMain,
+                fontSize = 14.sp
+            )
+
+            Spacer(Modifier.height(2.dp))
+
+            Text(
+                path,
+                color = TextMuted,
+                fontSize = 11.sp
+            )
+        }
+
+        TextButton(onClick = onCopy) {
+            Text("复制")
+        }
+    }
+}
+
+// 递归统计一个文件夹的总大小（不存在时返回 0）
+fun folderSize(file: File): Long {
+
+    if (!file.exists()) {
+        return 0L
+    }
+
+    if (file.isFile) {
+        return file.length()
+    }
+
+    return file.listFiles()?.sumOf { folderSize(it) } ?: 0L
 }

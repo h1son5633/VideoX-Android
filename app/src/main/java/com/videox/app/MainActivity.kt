@@ -6,13 +6,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,6 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
+import kotlinx.coroutines.launch
+
+import kotlin.math.roundToInt
 
 internal val Bg = Color(0xFF101411)
 internal val SurfaceGlass = Color(0xFF1C241F)
@@ -69,9 +72,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun VideoXApp(sharedText: String) {
 
-    var currentPage by remember {
-        mutableStateOf(0)
-    }
+    // 三个页面装进水平分页容器：点底栏动画平移过去，也能左右滑动切页
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount = { 3 }
+    )
+
+    val scope = rememberCoroutineScope()
 
     MaterialTheme {
 
@@ -79,15 +86,18 @@ fun VideoXApp(sharedText: String) {
             containerColor = Bg,
             bottomBar = {
                 BottomNavigationBar(
-                    currentPage = currentPage,
-                    onPageChange = {
-                        currentPage = it
+                    pagePosition = pagerState.currentPage +
+                            pagerState.currentPageOffsetFraction,
+                    onPageChange = { target ->
+                        scope.launch {
+                            pagerState.animateScrollToPage(target)
+                        }
                     },
                     modifier = Modifier
                         .navigationBarsPadding()
                         .padding(
-                            horizontal = 16.dp,
-                            vertical = 8.dp
+                            horizontal = 20.dp,
+                            vertical = 10.dp
                         )
                 )
             }
@@ -100,18 +110,26 @@ fun VideoXApp(sharedText: String) {
                     .padding(innerPadding)
             ) {
 
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                ) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
 
-                    Spacer(Modifier.height(16.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = 16.dp
+                            )
+                    ) {
 
-                    when (currentPage) {
-                        0 -> ParsePage(sharedText)
-                        1 -> DownloadPage()
-                        2 -> SettingsPage()
+                        when (page) {
+                            0 -> ParsePage(sharedText)
+                            1 -> DownloadPage()
+                            2 -> SettingsPage()
+                        }
                     }
                 }
             }
@@ -209,13 +227,17 @@ fun TabPill(
     }
 }
 
-// 底部导航
+// 底部导航（悬浮胶囊式：两端正半圆，跟随页面平移位置滑动高亮）
 @Composable
 fun BottomNavigationBar(
-    currentPage: Int,
+    pagePosition: Float,
     onPageChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
+
+    val selectedPage = pagePosition
+        .roundToInt()
+        .coerceIn(0, 2)
 
     Card(
         modifier = modifier
@@ -223,45 +245,39 @@ fun BottomNavigationBar(
             .border(
                 1.dp,
                 Color.White.copy(alpha = 0.16f),
-                RoundedCornerShape(28.dp)
+                RoundedCornerShape(percent = 50)
             ),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(percent = 50),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFF202820).copy(alpha = 0.72f)
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 10.dp
         )
     ) {
 
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .padding(6.dp)
                 .height(52.dp)
         ) {
 
             val itemWidth = maxWidth / 3
 
-            val animatedOffset by animateDpAsState(
-                targetValue = itemWidth * currentPage,
-                animationSpec = tween(
-                    durationMillis = 350,
-                    easing = FastOutSlowInEasing
-                ),
-                label = "nav_slide"
-            )
-
             Box(
                 modifier = Modifier
-                    .offset(x = animatedOffset)
+                    .offset(x = itemWidth * pagePosition)
                     .width(itemWidth)
                     .fillMaxHeight()
                     .background(
                         AccentColorState.value.copy(alpha = 0.30f),
-                        RoundedCornerShape(22.dp)
+                        RoundedCornerShape(percent = 50)
                     )
                     .border(
                         1.dp,
                         AccentColorState.value.copy(alpha = 0.45f),
-                        RoundedCornerShape(22.dp)
+                        RoundedCornerShape(percent = 50)
                     )
             )
 
@@ -272,7 +288,7 @@ fun BottomNavigationBar(
 
                 NavigationItem(
                     text = "解析",
-                    selected = currentPage == 0,
+                    selected = selectedPage == 0,
                     modifier = Modifier.weight(1f)
                 ) {
                     onPageChange(0)
@@ -280,7 +296,7 @@ fun BottomNavigationBar(
 
                 NavigationItem(
                     text = "下载",
-                    selected = currentPage == 1,
+                    selected = selectedPage == 1,
                     modifier = Modifier.weight(1f)
                 ) {
                     onPageChange(1)
@@ -288,7 +304,7 @@ fun BottomNavigationBar(
 
                 NavigationItem(
                     text = "设置",
-                    selected = currentPage == 2,
+                    selected = selectedPage == 2,
                     modifier = Modifier.weight(1f)
                 ) {
                     onPageChange(2)

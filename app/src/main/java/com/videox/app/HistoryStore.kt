@@ -10,11 +10,13 @@ data class ParseHistoryEntry(
     val sourceUrl: String,
     val type: String,
     val title: String,
+    val desc: String,
     val author: String,
     val cover: String,
     val videoUrl: String,
     val images: List<String>,
     val musicTitle: String,
+    val musicAuthor: String,
     val musicUrl: String,
     val time: Long
 )
@@ -71,11 +73,13 @@ object HistoryStore {
                         sourceUrl = obj.optString("sourceUrl", ""),
                         type = obj.optString("type", "video"),
                         title = obj.optString("title", ""),
+                        desc = obj.optString("desc", ""),
                         author = obj.optString("author", ""),
                         cover = obj.optString("cover", ""),
                         videoUrl = obj.optString("videoUrl", ""),
                         images = images,
                         musicTitle = obj.optString("musicTitle", ""),
+                        musicAuthor = obj.optString("musicAuthor", ""),
                         musicUrl = obj.optString("musicUrl", ""),
                         time = obj.optLong("time", 0L)
                     )
@@ -126,11 +130,13 @@ object HistoryStore {
             obj.put("sourceUrl", entry.sourceUrl)
             obj.put("type", entry.type)
             obj.put("title", entry.title)
+            obj.put("desc", entry.desc)
             obj.put("author", entry.author)
             obj.put("cover", entry.cover)
             obj.put("videoUrl", entry.videoUrl)
             obj.put("images", imagesArray)
             obj.put("musicTitle", entry.musicTitle)
+            obj.put("musicAuthor", entry.musicAuthor)
             obj.put("musicUrl", entry.musicUrl)
             obj.put("time", entry.time)
 
