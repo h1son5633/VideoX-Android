@@ -3,12 +3,16 @@ package com.videox.app
 import android.content.ClipboardManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
+import android.widget.VideoView
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,9 +22,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.ColorPainter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+
+import coil.compose.AsyncImage
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -31,6 +41,9 @@ import org.json.JSONObject
 import java.net.URL
 import java.net.URLEncoder
 import java.net.HttpURLConnection
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun ParsePage(sharedText: String) {
@@ -75,12 +88,66 @@ fun ParsePage(sharedText: String) {
         mutableStateOf<List<String>>(emptyList())
     }
 
+    var musicTitle by remember {
+        mutableStateOf("")
+    }
+
+    var musicUrl by remember {
+        mutableStateOf("")
+    }
+
+    var multiSelectMode by remember {
+        mutableStateOf(false)
+    }
+
+    var selectedImages by remember {
+        mutableStateOf<Set<Int>>(emptySet())
+    }
+
+    var viewerIndex by remember {
+        mutableStateOf(-1)
+    }
+
+    var showPlayer by remember {
+        mutableStateOf(false)
+    }
+
+    var videoViewRef by remember {
+        mutableStateOf<VideoView?>(null)
+    }
+
     var localFileName by remember {
         mutableStateOf("")
     }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    var historyEntries by remember {
+        mutableStateOf<List<ParseHistoryEntry>>(emptyList())
+    }
+
+    // 从历史记录恢复一条解析结果（不重新请求接口）
+    fun restoreFromHistory(entry: ParseHistoryEntry) {
+
+        url = entry.sourceUrl
+        videoTitle = entry.title
+        author = entry.author
+        coverUrl = entry.cover
+        contentType = entry.type
+        videoUrl = entry.videoUrl
+        imageUrls = entry.images
+        musicTitle = entry.musicTitle
+        musicUrl = entry.musicUrl
+        multiSelectMode = false
+        selectedImages = emptySet()
+        showPlayer = false
+        recognized =
+            entry.videoUrl.startsWith("http://") ||
+            entry.videoUrl.startsWith("https://") ||
+            entry.images.isNotEmpty()
+        message = "已从历史记录恢复，点击即可下载"
+    }
 
     // TXT 文件选择器
     val txtPicker = rememberLauncherForActivityResult(
@@ -150,6 +217,20 @@ fun ParsePage(sharedText: String) {
             recognized = false
             videoUrl = ""
             message = "已接收分享内容，请点击解析"
+        }
+    }
+
+    // 进入页面时加载解析历史
+    LaunchedEffect(Unit) {
+
+        historyEntries = HistoryStore.load(context)
+    }
+
+    // 离开解析页时停掉预览播放，避免后台继续出声
+    DisposableEffect(Unit) {
+
+        onDispose {
+            videoViewRef?.stopPlayback()
         }
     }
 
@@ -226,6 +307,12 @@ fun ParsePage(sharedText: String) {
                     videoUrl = ""
                     contentType = "video"
                     imageUrls = emptyList()
+                    musicTitle = ""
+                    musicUrl = ""
+                    multiSelectMode = false
+                    selectedImages = emptySet()
+                    videoViewRef?.stopPlayback()
+                    showPlayer = false
                 },
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = {
@@ -351,6 +438,12 @@ fun ParsePage(sharedText: String) {
                             videoUrl = ""
                             contentType = "video"
                             imageUrls = emptyList()
+                            musicTitle = ""
+                            musicUrl = ""
+                            multiSelectMode = false
+                            selectedImages = emptySet()
+                            videoViewRef?.stopPlayback()
+                            showPlayer = false
                             message = "正在请求解析接口..."
 
                             scope.launch {
@@ -422,6 +515,19 @@ fun ParsePage(sharedText: String) {
 
                                         imageUrls = parsedImages
 
+                                        val musicObject =
+                                            data.optJSONObject("music")
+
+                                        musicTitle = musicObject?.optString(
+                                            "title",
+                                            ""
+                                        ) ?: ""
+
+                                        musicUrl = musicObject?.optString(
+                                            "url",
+                                            ""
+                                        ) ?: ""
+
                                         val hasVideo =
                                             videoUrl.startsWith("http://") ||
                                             videoUrl.startsWith("https://")
@@ -444,6 +550,28 @@ fun ParsePage(sharedText: String) {
 
                                             else ->
                                                 "解析成功，但没有获取到可下载的内容"
+                                        }
+
+                                        if (recognized) {
+
+                                            HistoryStore.add(
+                                                context,
+                                                ParseHistoryEntry(
+                                                    sourceUrl = douyinUrl,
+                                                    type = contentType,
+                                                    title = videoTitle,
+                                                    author = author,
+                                                    cover = coverUrl,
+                                                    videoUrl = videoUrl,
+                                                    images = parsedImages,
+                                                    musicTitle = musicTitle,
+                                                    musicUrl = musicUrl,
+                                                    time = System.currentTimeMillis()
+                                                )
+                                            )
+
+                                            historyEntries =
+                                                HistoryStore.load(context)
                                         }
 
                                     } else {
@@ -509,20 +637,139 @@ fun ParsePage(sharedText: String) {
                     fontSize = 13.sp
                 )
 
-                if (coverUrl.isNotBlank()) {
+                if (musicUrl.startsWith("http://") ||
+                    musicUrl.startsWith("https://")
+                ) {
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(10.dp))
 
-                    Text(
-                        "已获取封面地址",
-                        color = AccentColorState.value,
-                        fontSize = 12.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        Text(
+                            "背景音乐：${musicTitle.ifBlank { "未知音乐" }}",
+                            color = TextMuted,
+                            fontSize = 13.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        TextButton(
+                            onClick = {
+
+                                downloadMusic(
+                                    context = context,
+                                    musicUrl = musicUrl,
+                                    musicTitle = musicTitle,
+                                    workTitle = videoTitle
+                                )
+                            }
+                        ) {
+                            Text("下载音乐")
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(14.dp))
 
                 if (videoUrl.isNotBlank()) {
+
+                    // 视频预览：默认显示封面，点封面开始播放
+                    if (showPlayer) {
+
+                        AndroidView(
+                            factory = { ctx ->
+
+                                VideoView(ctx).apply {
+
+                                    val uri = Uri.parse(videoUrl)
+
+                                    if (Build.VERSION.SDK_INT >= 26) {
+
+                                        setVideoURI(
+                                            uri,
+                                            mapOf(
+                                                "User-Agent" to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
+                                                "Referer" to "https://www.douyin.com/"
+                                            )
+                                        )
+
+                                    } else {
+
+                                        setVideoURI(uri)
+                                    }
+
+                                    setOnPreparedListener { player ->
+                                        player.start()
+                                    }
+
+                                    setOnClickListener { view ->
+
+                                        val vv = view as VideoView
+
+                                        if (vv.isPlaying) {
+                                            vv.pause()
+                                        } else {
+                                            vv.start()
+                                        }
+                                    }
+
+                                    videoViewRef = this
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(Color.Black)
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                videoViewRef?.stopPlayback()
+                                showPlayer = false
+                            }
+                        ) {
+                            Text("关闭预览（点画面可暂停/继续）")
+                        }
+
+                    } else if (coverUrl.isNotBlank()) {
+
+                        AsyncImage(
+                            model = coverUrl,
+                            contentDescription = "视频封面",
+                            contentScale = ContentScale.Crop,
+                            placeholder = ColorPainter(Color(0xFF2A332C)),
+                            error = ColorPainter(Color(0xFF2A332C)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(Color(0xFF2A332C))
+                                .clickable {
+                                    showPlayer = true
+                                }
+                        )
+
+                        Spacer(Modifier.height(6.dp))
+
+                        Text(
+                            "点封面播放预览",
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+
+                    } else {
+
+                        Text(
+                            "未获取到封面",
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
 
                     GreenButton(
                         text = "下载视频",
@@ -535,6 +782,25 @@ fun ParsePage(sharedText: String) {
                             )
                         }
                     )
+
+                    if (coverUrl.isNotBlank()) {
+
+                        Spacer(Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+
+                                downloadCover(
+                                    context = context,
+                                    coverUrl = coverUrl,
+                                    title = videoTitle
+                                )
+                            }
+                        ) {
+                            Text("保存封面")
+                        }
+                    }
 
                 } else if (imageUrls.isNotEmpty()) {
 
@@ -557,6 +823,130 @@ fun ParsePage(sharedText: String) {
                             )
                         }
                     )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        OutlinedButton(
+                            onClick = {
+                                multiSelectMode = !multiSelectMode
+                                selectedImages = emptySet()
+                            }
+                        ) {
+                            Text(
+                                if (multiSelectMode) {
+                                    "退出多选"
+                                } else {
+                                    "多选"
+                                }
+                            )
+                        }
+
+                        if (multiSelectMode) {
+
+                            Text(
+                                "已选 ${selectedImages.size} 张",
+                                color = TextMuted,
+                                fontSize = 13.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    selectedImages =
+                                        imageUrls.indices.toSet()
+                                }
+                            ) {
+                                Text("全选")
+                            }
+
+                            TextButton(
+                                onClick = {
+
+                                    downloadImages(
+                                        context = context,
+                                        imageUrls = imageUrls,
+                                        title = videoTitle,
+                                        onlyIndices = selectedImages
+                                    )
+                                }
+                            ) {
+                                Text("下载所选")
+                            }
+                        }
+                    }
+
+                    // 图片逐张展示：每张可单独下载，点开看大图
+                    imageUrls.forEachIndexed { index, imageUrl ->
+
+                        Spacer(Modifier.height(14.dp))
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+
+                            if (multiSelectMode) {
+
+                                Checkbox(
+                                    checked = index in selectedImages,
+                                    onCheckedChange = { checked ->
+
+                                        selectedImages =
+                                            if (checked) {
+                                                selectedImages + index
+                                            } else {
+                                                selectedImages - index
+                                            }
+                                    }
+                                )
+                            }
+
+                            Text(
+                                "第 ${index + 1} 张",
+                                color = TextMain,
+                                fontSize = 14.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            TextButton(
+                                onClick = {
+
+                                    downloadImages(
+                                        context = context,
+                                        imageUrls = imageUrls,
+                                        title = videoTitle,
+                                        onlyIndices = setOf(index)
+                                    )
+                                }
+                            ) {
+                                Text("下载这张")
+                            }
+                        }
+
+                        AsyncImage(
+                            model = imageUrl,
+                            contentDescription = "第 ${index + 1} 张图片",
+                            contentScale = ContentScale.Crop,
+                            placeholder = ColorPainter(Color(0xFF2A332C)),
+                            error = ColorPainter(Color(0xFF2A332C)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(280.dp)
+                                .background(Color(0xFF2A332C))
+                                .clickable {
+                                    viewerIndex = index
+                                }
+                        )
+
+                        Text(
+                            "点图片看大图",
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
 
             } else {
@@ -565,6 +955,85 @@ fun ParsePage(sharedText: String) {
                     "解析后将在这里显示标题和下载入口",
                     color = TextMuted,
                     fontSize = 13.sp
+                )
+            }
+        }
+
+        if (historyEntries.isNotEmpty()) {
+
+            Spacer(Modifier.height(18.dp))
+
+            // 解析历史
+            RoundedPanel {
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+
+                    Text(
+                        "解析历史",
+                        color = TextMain,
+                        fontSize = 18.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    TextButton(
+                        onClick = {
+
+                            HistoryStore.clear(context)
+                            historyEntries = emptyList()
+                        }
+                    ) {
+                        Text("清空")
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                historyEntries.forEach { entry ->
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                restoreFromHistory(entry)
+                            }
+                    ) {
+
+                        Text(
+                            (if (entry.type == "image") {
+                                "【图集】"
+                            } else {
+                                "【视频】"
+                            }) + entry.title.ifBlank { "无标题" },
+                            color = TextMain,
+                            fontSize = 14.sp,
+                            maxLines = 2
+                        )
+
+                        Text(
+                            SimpleDateFormat(
+                                "MM-dd HH:mm",
+                                Locale.getDefault()
+                            ).format(Date(entry.time)) +
+                                    " · " + entry.author.ifBlank { "未知作者" } +
+                                    if (entry.type == "image") {
+                                        " · ${entry.images.size} 张图"
+                                    } else {
+                                        ""
+                                    },
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                Text(
+                    "点任意一条即可恢复当时的解析结果，不用重新解析",
+                    color = TextMuted,
+                    fontSize = 12.sp
                 )
             }
         }
@@ -581,6 +1050,43 @@ fun ParsePage(sharedText: String) {
         )
 
         Spacer(Modifier.height(16.dp))
+    }
+
+    // 图集大图查看（点任意一张图打开，点画面关闭）
+    if (viewerIndex in imageUrls.indices) {
+
+        Dialog(
+            onDismissRequest = {
+                viewerIndex = -1
+            }
+        ) {
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable {
+                        viewerIndex = -1
+                    }
+            ) {
+
+                AsyncImage(
+                    model = imageUrls[viewerIndex],
+                    contentDescription = "第 ${viewerIndex + 1} 张图片大图",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                Text(
+                    "第 ${viewerIndex + 1} 张 / 共 ${imageUrls.size} 张 · 点任意处关闭",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(16.dp)
+                )
+            }
+        }
     }
 }
 

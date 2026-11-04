@@ -127,11 +127,94 @@ fun downloadVideo(
     }
 }
 
-// 下载图集中的全部图片（会读取设置：仅 Wi-Fi 下载、默认保存到相册）
+// 提交一个图片下载任务（标题统一带 VideoX - 前缀，下载记录页靠它识别）
+// 会读取设置：仅 Wi-Fi 下载、默认保存到相册；成功返回 true
+fun enqueueImageDownload(
+    context: Context,
+    manager: DownloadManager,
+    imageUrl: String,
+    displayTitle: String,
+    fileName: String
+): Boolean {
+
+    return try {
+
+        val uri = Uri.parse(imageUrl)
+
+        if (
+            (uri.scheme != "http" && uri.scheme != "https") ||
+            uri.host.isNullOrBlank()
+        ) {
+            return false
+        }
+
+        val request = DownloadManager.Request(uri)
+            .setTitle(displayTitle)
+            .setDescription("VideoX 正在下载图片")
+            .setNotificationVisibility(
+                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+            )
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        // 仅 Wi-Fi 下载（设置中开启时限制网络类型）
+        if (SettingsStore.wifiOnly(context)) {
+
+            request.setAllowedNetworkTypes(
+                DownloadManager.Request.NETWORK_WIFI
+            )
+
+        } else {
+
+            request.setAllowedNetworkTypes(
+                DownloadManager.Request.NETWORK_WIFI or
+                        DownloadManager.Request.NETWORK_MOBILE
+            )
+        }
+
+        // 保存位置：开启“保存到相册”时存入公共图片目录（相册可见），
+        // 否则存入下载目录
+        if (SettingsStore.saveToGallery(context)) {
+
+            request.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_PICTURES,
+                "VideoX/$fileName"
+            )
+
+        } else {
+
+            request.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                fileName
+            )
+        }
+
+        request.addRequestHeader(
+            "User-Agent",
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
+        )
+
+        request.addRequestHeader(
+            "Referer",
+            "https://www.douyin.com/"
+        )
+
+        manager.enqueue(request)
+
+        true
+
+    } catch (e: Exception) {
+
+        false
+    }
+}
+
+// 下载图集图片（onlyIndices 为空时下载全部，否则只下载勾选的图片）
 fun downloadImages(
     context: Context,
     imageUrls: List<String>,
-    title: String
+    title: String,
+    onlyIndices: Set<Int>? = null
 ) {
 
     if (imageUrls.isEmpty()) {
@@ -139,6 +222,17 @@ fun downloadImages(
         Toast.makeText(
             context,
             "没有可下载的图片",
+            Toast.LENGTH_SHORT
+        ).show()
+
+        return
+    }
+
+    if (onlyIndices != null && onlyIndices.isEmpty()) {
+
+        Toast.makeText(
+            context,
+            "先勾选要下载的图片",
             Toast.LENGTH_SHORT
         ).show()
 
@@ -153,80 +247,25 @@ fun downloadImages(
 
     imageUrls.forEachIndexed { index, imageUrl ->
 
-        try {
+        if (onlyIndices != null && index !in onlyIndices) {
+            return@forEachIndexed
+        }
 
-            val uri = Uri.parse(imageUrl)
+        val ext = imageFileExtension(imageUrl)
 
-            if (
-                (uri.scheme != "http" && uri.scheme != "https") ||
-                uri.host.isNullOrBlank()
-            ) {
-                return@forEachIndexed
-            }
+        val fileName =
+            "VideoX_${System.currentTimeMillis()}_${index + 1}.$ext"
 
-            val ext = imageFileExtension(imageUrl)
+        val ok = enqueueImageDownload(
+            context = context,
+            manager = manager,
+            imageUrl = imageUrl,
+            displayTitle = "VideoX - ${title.ifBlank { "抖音图集" }}（图 ${index + 1}/${imageUrls.size}）",
+            fileName = fileName
+        )
 
-            val fileName =
-                "VideoX_${System.currentTimeMillis()}_${index + 1}.$ext"
-
-            val request = DownloadManager.Request(uri)
-                .setTitle("VideoX - ${title.ifBlank { "抖音图集" }}（图 ${index + 1}/${imageUrls.size}）")
-                .setDescription("VideoX 正在下载图集图片")
-                .setNotificationVisibility(
-                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(true)
-
-            // 仅 Wi-Fi 下载（设置中开启时限制网络类型）
-            if (SettingsStore.wifiOnly(context)) {
-
-                request.setAllowedNetworkTypes(
-                    DownloadManager.Request.NETWORK_WIFI
-                )
-
-            } else {
-
-                request.setAllowedNetworkTypes(
-                    DownloadManager.Request.NETWORK_WIFI or
-                            DownloadManager.Request.NETWORK_MOBILE
-                )
-            }
-
-            // 保存位置：开启“保存到相册”时存入公共图片目录（相册可见），
-            // 否则存入下载目录
-            if (SettingsStore.saveToGallery(context)) {
-
-                request.setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_PICTURES,
-                    "VideoX/$fileName"
-                )
-
-            } else {
-
-                request.setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS,
-                    fileName
-                )
-            }
-
-            request.addRequestHeader(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
-            )
-
-            request.addRequestHeader(
-                "Referer",
-                "https://www.douyin.com/"
-            )
-
-            manager.enqueue(request)
-
+        if (ok) {
             submitted++
-
-        } catch (e: Exception) {
-
-            // 单张图片提交失败时跳过，继续提交其余图片
         }
     }
 
@@ -239,6 +278,153 @@ fun downloadImages(
         },
         Toast.LENGTH_LONG
     ).show()
+}
+
+// 下载视频封面为图片
+fun downloadCover(
+    context: Context,
+    coverUrl: String,
+    title: String
+) {
+
+    if (coverUrl.isBlank()) {
+
+        Toast.makeText(
+            context,
+            "没有可保存的封面",
+            Toast.LENGTH_SHORT
+        ).show()
+
+        return
+    }
+
+    val manager = context.getSystemService(
+        Context.DOWNLOAD_SERVICE
+    ) as DownloadManager
+
+    val ext = imageFileExtension(coverUrl)
+
+    val fileName =
+        "VideoX_${System.currentTimeMillis()}_cover.$ext"
+
+    val ok = enqueueImageDownload(
+        context = context,
+        manager = manager,
+        imageUrl = coverUrl,
+        displayTitle = "VideoX - ${title.ifBlank { "抖音视频" }}（封面）",
+        fileName = fileName
+    )
+
+    Toast.makeText(
+        context,
+        if (ok) {
+            "封面下载已提交"
+        } else {
+            "封面下载提交失败"
+        },
+        Toast.LENGTH_LONG
+    ).show()
+}
+
+// 下载背景音乐（会读取设置：仅 Wi-Fi 下载、默认保存到相册）
+fun downloadMusic(
+    context: Context,
+    musicUrl: String,
+    musicTitle: String,
+    workTitle: String
+) {
+
+    try {
+
+        val uri = Uri.parse(musicUrl)
+
+        if (
+            (uri.scheme != "http" && uri.scheme != "https") ||
+            uri.host.isNullOrBlank()
+        ) {
+
+            Toast.makeText(
+                context,
+                "音乐地址无效",
+                Toast.LENGTH_LONG
+            ).show()
+
+            return
+        }
+
+        val manager = context.getSystemService(
+            Context.DOWNLOAD_SERVICE
+        ) as DownloadManager
+
+        val fileName = "VideoX_${System.currentTimeMillis()}.mp3"
+
+        val request = DownloadManager.Request(uri)
+            .setTitle("VideoX - ${workTitle.ifBlank { "抖音作品" }}（音乐：${musicTitle.ifBlank { "背景音乐" }}）")
+            .setDescription("VideoX 正在下载背景音乐")
+            .setNotificationVisibility(
+                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+            )
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+
+        // 仅 Wi-Fi 下载（设置中开启时限制网络类型）
+        if (SettingsStore.wifiOnly(context)) {
+
+            request.setAllowedNetworkTypes(
+                DownloadManager.Request.NETWORK_WIFI
+            )
+
+        } else {
+
+            request.setAllowedNetworkTypes(
+                DownloadManager.Request.NETWORK_WIFI or
+                        DownloadManager.Request.NETWORK_MOBILE
+            )
+        }
+
+        // 保存位置：开启“保存到相册”时存入公共音乐目录，
+        // 否则存入下载目录
+        if (SettingsStore.saveToGallery(context)) {
+
+            request.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_MUSIC,
+                "VideoX/$fileName"
+            )
+
+        } else {
+
+            request.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_DOWNLOADS,
+                fileName
+            )
+        }
+
+        request.addRequestHeader(
+            "User-Agent",
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36"
+        )
+
+        request.addRequestHeader(
+            "Referer",
+            "https://www.douyin.com/"
+        )
+
+        manager.enqueue(request)
+
+        Toast.makeText(
+            context,
+            "音乐下载已提交",
+            Toast.LENGTH_LONG
+        ).show()
+
+    } catch (e: Exception) {
+
+        Toast.makeText(
+            context,
+            "音乐下载提交失败：${e.message ?: "未知错误"}",
+            Toast.LENGTH_LONG
+        ).show()
+    }
 }
 
 // 根据图片直链判断文件扩展名（抖音图集直链多为 webp）
