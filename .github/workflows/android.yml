@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - main
+    # 防刷发布：只有当提交包含工作流文件本身时才构建发版；
+    # 每次发版都最后上传工作流文件，所以中间分批提交不会再逐个触发
+    paths:
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:
@@ -62,14 +66,9 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: VideoX v1.2.1（Build #${{ github.run_number }}）
           body: |
-            VideoX Android v1.2.1：小更新合集，打开 App 即可收到更新提示，直接在应用内下载安装。
-            - 链接输入框字号调小，分享文案提示一行显示不再折行
-            - 解析历史新增平台小标签（抖音 / B站），混存也好认
-            - 解析前验链接：粘错链接时输入框下方即时红字提醒
-            - 主页副标题改为“媒体下载助手”
-            - 设置新增“储存”二级页：下载位置、文件夹路径、缓存与占用都收进去了
-            - 设置新增“关于”二级页：版本、检查更新、免责声明、仓库直达链接
-            - 更换全新白底图标：图形居中留白，不再顶格放大
+            VideoX Android v1.2.2：解析页瘦身与改名善后，打开 App 即可收到更新提示，直接在应用内下载安装。
+            - 主页按钮瘦身：只留“粘贴”和“开始解析”并排一行，移除“读取 TXT”和“选择本地视频”（含相关代码）
+            - 仓库迁移到新用户名 h1son5633：应用内更新检查与“关于”页仓库链接已同步换成新地址
             构建编号：${{ github.run_number }}
           files: app/build/outputs/apk/release/app-release.apk
           prerelease: false
