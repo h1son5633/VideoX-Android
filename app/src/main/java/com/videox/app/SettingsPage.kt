@@ -48,6 +48,11 @@ fun SettingsPage() {
         mutableStateOf(SettingsStore.destCode(context, "music"))
     }
 
+    // 手动“检查更新”命中的新版本（非空时弹更新窗）
+    var manualUpdate by remember {
+        mutableStateOf<UpdateInfo?>(null)
+    }
+
     var autoClipboard by remember {
         mutableStateOf(SettingsStore.autoClipboard(context))
     }
@@ -673,6 +678,48 @@ fun SettingsPage() {
                 "版本 $versionName",
                 color = TextMuted,
                 fontSize = 13.sp
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = {
+
+                    scope.launch {
+
+                        Toast.makeText(
+                            context,
+                            "正在检查更新…",
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        val info = checkForUpdate(context)
+
+                        if (info != null) {
+                            manualUpdate = info
+                        } else {
+
+                            Toast.makeText(
+                                context,
+                                "已是最新版本",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+            ) {
+                Text("检查更新")
+            }
+        }
+
+        // 手动检查更新命中的弹窗
+        manualUpdate?.let { info ->
+
+            UpdateDialog(
+                info = info,
+                onDismiss = {
+                    manualUpdate = null
+                }
             )
         }
 
