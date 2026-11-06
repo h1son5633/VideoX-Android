@@ -63,14 +63,11 @@ jobs:
       - name: Publish APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: VideoX v1.2.3（Build #${{ github.run_number }}）
+          tag_name: v1.2.4
+          name: VideoX v1.2.4（Build #${{ github.run_number }}）
           body: |
-            VideoX Android v1.2.3：动图在 OPPO/一加相册里能动了，解析接口可以切换，打开 App 即可收到更新提示，直接在应用内下载安装。
-            - 动图修复：保存动图时补齐 OPPO/一加的动态照片标记（照一加 13T 原厂样本复刻），ColorOS 相册可识别并播放；谷歌相册等照常
-            - 解析接口可切换：设置里新增“解析接口”，接口一（推荐）/接口二/接口三任选，某个接口失效或变慢时换一个；接口三仅支持抖音（B站链接会自动用接口一）
-            - 检查更新更诚实：检查失败时明确提示“检查失败，请检查网络后重试”，不再误报“已是最新版本”
-            - 底栏外观默认改为“跟随系统”：底板颜色随系统深/浅模式（已手动选过的不受影响）
+            VideoX Android v1.2.4：修复应用内更新下载，国内网络也能直接更新。
+            - 更新下载重做：多线程分段下载 + 多条线路自动切换（国内加速线路优先），解决“下载失败”
             构建编号：${{ github.run_number }}
           files: app/build/outputs/apk/release/app-release.apk
           prerelease: false
