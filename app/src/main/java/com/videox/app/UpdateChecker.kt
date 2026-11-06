@@ -37,6 +37,24 @@ data class UpdateInfo(
     val apkUrl: String
 )
 
+// 检查更新的三种结果，必须分开：以前统一返回 null，
+// “检查失败”会被误报成“已是最新版本”
+sealed interface UpdateCheckResult {
+
+    // 有新版本可用
+    data class HasUpdate(
+        val info: UpdateInfo
+    ) : UpdateCheckResult
+
+    // 已确认是最新版本
+    object UpToDate : UpdateCheckResult
+
+    // 检查失败（网络/服务器/数据异常），reason 只作内部区分
+    data class Failed(
+        val reason: String
+    ) : UpdateCheckResult
+}
+
 // 当前已安装的版本号（读不到时按 0.0.0 处理，总会提示更新）
 fun currentVersionName(context: Context): String {
 
@@ -78,8 +96,10 @@ fun isNewerVersion(latest: String, current: String): Boolean {
     return false
 }
 
-// 查 GitHub 最新正式发行：有比当前更新的版本就返回它，没有/失败返回 null
-suspend fun checkForUpdate(context: Context): UpdateInfo? {
+// 查 GitHub 最新正式发行，结果分三态返回（有新版/已是最新/检查失败）
+suspend fun checkForUpdate(
+    context: Context
+): UpdateCheckResult {
 
     return withContext(Dispatchers.IO) {
 
@@ -105,14 +125,20 @@ suspend fun checkForUpdate(context: Context): UpdateInfo? {
                     "VideoX-Android"
                 )
 
-                if (connection.responseCode !in 200..299) {
-                    return@withContext null
+                val status = connection.responseCode
+
+                if (status !in 200..299) {
+                    return@withContext UpdateCheckResult.Failed(
+                        "服务器返回 HTTP $status"
+                    )
                 }
 
                 val body = connection.inputStream
                     ?.bufferedReader()
                     ?.use { it.readText() }
-                    ?: return@withContext null
+                    ?: return@withContext UpdateCheckResult.Failed(
+                        "服务器没有返回内容"
+                    )
 
                 val json = JSONObject(body)
 
@@ -122,14 +148,16 @@ suspend fun checkForUpdate(context: Context): UpdateInfo? {
                     .find(name)
                     ?.groupValues
                     ?.get(1)
-                    ?: return@withContext null
+                    ?: return@withContext UpdateCheckResult.Failed(
+                        "无法识别最新版本信息"
+                    )
 
                 if (!isNewerVersion(
                         version,
                         currentVersionName(context)
                     )
                 ) {
-                    return@withContext null
+                    return@withContext UpdateCheckResult.UpToDate
                 }
 
                 val assets = json.optJSONArray("assets")
@@ -157,13 +185,17 @@ suspend fun checkForUpdate(context: Context): UpdateInfo? {
                 }
 
                 if (apkUrl.isBlank()) {
-                    return@withContext null
+                    return@withContext UpdateCheckResult.Failed(
+                        "最新版没有安装包"
+                    )
                 }
 
-                UpdateInfo(
-                    version = version,
-                    notes = json.optString("body", "").trim(),
-                    apkUrl = apkUrl
+                UpdateCheckResult.HasUpdate(
+                    UpdateInfo(
+                        version = version,
+                        notes = json.optString("body", "").trim(),
+                        apkUrl = apkUrl
+                    )
                 )
 
             } finally {
@@ -173,7 +205,9 @@ suspend fun checkForUpdate(context: Context): UpdateInfo? {
 
         } catch (e: Exception) {
 
-            null
+            UpdateCheckResult.Failed(
+                e.message ?: "网络异常"
+            )
         }
     }
 }

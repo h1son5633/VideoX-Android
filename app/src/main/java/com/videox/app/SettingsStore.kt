@@ -20,6 +20,7 @@ object SettingsStore {
     private const val KEY_WIFI_ONLY = "wifi_only"
     private const val KEY_NAV_STYLE = "nav_style"
     private const val KEY_NAV_BOARD_COLOR = "nav_board_color"
+    private const val KEY_PARSE_API = "parse_api"
     private const val KEY_VIDEO_DEST = "video_dest"
     private const val KEY_IMAGE_DEST = "image_dest"
     private const val KEY_MUSIC_DEST = "music_dest"
@@ -90,7 +91,8 @@ object SettingsStore {
     // ===== 底栏外观 =====
 
     fun navStyle(context: Context): Int {
-        return prefs(context).getInt(KEY_NAV_STYLE, NAV_STYLE_BOARD)
+        // 默认“跟随系统”：底板颜色随系统深/浅模式（用户 2026-11-06 指定）
+        return prefs(context).getInt(KEY_NAV_STYLE, NAV_STYLE_SYSTEM)
     }
 
     fun setNavStyle(context: Context, value: Int) {
@@ -110,6 +112,23 @@ object SettingsStore {
     fun setNavBoardColor(context: Context, color: Color) {
         prefs(context).edit()
             .putInt(KEY_NAV_BOARD_COLOR, color.toArgb())
+            .apply()
+    }
+
+    // ===== 解析接口 =====
+
+    // 解析接口编号：1 = 接口一（推荐），2 = 接口二，3 = 接口三
+    const val PARSE_API_1 = 1
+    const val PARSE_API_2 = 2
+    const val PARSE_API_3 = 3
+
+    fun parseApi(context: Context): Int {
+        return prefs(context).getInt(KEY_PARSE_API, PARSE_API_1)
+    }
+
+    fun setParseApi(context: Context, value: Int) {
+        prefs(context).edit()
+            .putInt(KEY_PARSE_API, value)
             .apply()
     }
 

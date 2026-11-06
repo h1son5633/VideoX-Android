@@ -311,7 +311,13 @@ fun ParsePage(sharedText: String) {
 
                     try {
 
-                        val result = parseShare(linkUrl, platform)
+                        val outcome = parseShare(
+                            linkUrl,
+                            platform,
+                            ParseApiState.value
+                        )
+
+                        val result = outcome.json
 
                         val code = result.optInt("code")
                         val data = result.optJSONObject("data")
@@ -513,6 +519,13 @@ fun ParsePage(sharedText: String) {
 
                                 else ->
                                     "解析成功，但没有获取到可下载的内容"
+                            }
+
+                            if (outcome.apiUsed !=
+                                ParseApiState.value
+                            ) {
+                                message +=
+                                    "（接口三不支持 B 站，已自动用接口一解析）"
                             }
 
                             if (recognized) {
@@ -1865,27 +1878,161 @@ fun extractShareLink(input: String): Pair<String, String>? {
     return null
 }
 
-// 请求解析接口（按平台选端点：抖音 /jiexi/douyin，B站 /jiexi/bilibili）
+// 一次解析的结果：统一格式的 JSON + 实际用上的接口编号
+// （接口三不支持 B 站会回落到接口一，界面需要据此提示用户）
+data class ParseOutcome(
+    val json: JSONObject,
+    val apiUsed: Int
+)
+
+// 请求解析接口，按用户在设置里选的接口分发（2026-11-06 逐家实测）：
+// 接口一 odysphere：抖音/B站/动图全支持，默认推荐
+// 接口二 bugpk：返回结构与接口一相同，抖音/B站/动图全支持，备用线路
+// 接口三 xingzhige：仅抖音、速度快，但动图只返回静态图，返回结构不同需适配
 suspend fun parseShare(
     inputUrl: String,
-    platform: String
+    platform: String,
+    apiId: Int
+): ParseOutcome {
+
+    val encodedUrl = URLEncoder.encode(
+        inputUrl.trim(),
+        "UTF-8"
+    )
+
+    val endpoint = if (platform == "bilibili") {
+        "bilibili"
+    } else {
+        "douyin"
+    }
+
+    // 接口三不支持 B 站：自动回落到接口一
+    val effectiveApi =
+        if (apiId == SettingsStore.PARSE_API_3 &&
+            platform == "bilibili"
+        ) {
+            SettingsStore.PARSE_API_1
+        } else {
+            apiId
+        }
+
+    val json = when (effectiveApi) {
+
+        SettingsStore.PARSE_API_2 -> fetchParseJson(
+            "https://api.bugpk.com/api/$endpoint?url=$encodedUrl"
+        )
+
+        SettingsStore.PARSE_API_3 -> adaptXingzhige(
+            fetchParseJson(
+                "https://api.xingzhige.com/API/douyin/?url=$encodedUrl"
+            )
+        )
+
+        else -> fetchParseJson(
+            "https://api.odysphere.tech/jiexi/$endpoint?url=$encodedUrl"
+        )
+    }
+
+    return ParseOutcome(json, effectiveApi)
+}
+
+// 把接口三（xingzhige）的返回适配成与接口一相同的结构：
+// 成功 code=0，字段在 data.item / data.author 下；失败原样透传 code 与 msg
+private fun adaptXingzhige(raw: JSONObject): JSONObject {
+
+    if (raw.optInt("code", -1) != 0) {
+
+        return JSONObject()
+            .put("code", raw.optInt("code", -1))
+            .put("msg", raw.optString("msg", "未知错误"))
+    }
+
+    val data = raw.optJSONObject("data")
+        ?: return JSONObject()
+            .put("code", -1)
+            .put("msg", "接口三返回数据为空")
+
+    val item = data.optJSONObject("item")
+        ?: return JSONObject()
+            .put("code", -1)
+            .put("msg", "接口三返回数据为空")
+
+    val typeCn = data.optJSONObject("jx")
+        ?.optString("type", "")
+        ?: ""
+
+    val adapted = JSONObject()
+
+    adapted.put(
+        "title",
+        item.optString("title", "")
+    )
+
+    adapted.put(
+        "desc",
+        item.optString("title", "")
+    )
+
+    adapted.put(
+        "author",
+        JSONObject().put(
+            "name",
+            data.optJSONObject("author")
+                ?.optString("name", "")
+                ?: ""
+        )
+    )
+
+    adapted.put(
+        "cover",
+        item.optString("cover", "")
+    )
+
+    adapted.put(
+        "url",
+        item.optString("url", "")
+    )
+
+    adapted.put(
+        "type",
+        if (typeCn == "图集") {
+            "image"
+        } else {
+            "video"
+        }
+    )
+
+    val images = item.optJSONArray("images")
+
+    if (images != null) {
+        adapted.put("images", images)
+    }
+
+    // 对方的音乐字段名就拼作 muisic（原文如此），值是音频直链
+    val musicUrl = item.optString("muisic", "")
+
+    if (musicUrl.isNotBlank()) {
+
+        adapted.put(
+            "music",
+            JSONObject()
+                .put("title", "")
+                .put("author", "")
+                .put("url", musicUrl)
+        )
+    }
+
+    return JSONObject()
+        .put("code", 200)
+        .put("data", adapted)
+}
+
+// GET 一个解析接口并把响应解析为 JSON（各接口共用的请求与校验逻辑）
+private suspend fun fetchParseJson(
+    apiUrl: String
 ): JSONObject {
 
     return withContext(Dispatchers.IO) {
-
-        val encodedUrl = URLEncoder.encode(
-            inputUrl.trim(),
-            "UTF-8"
-        )
-
-        val endpoint = if (platform == "bilibili") {
-            "bilibili"
-        } else {
-            "douyin"
-        }
-
-        val apiUrl =
-            "https://api.odysphere.tech/jiexi/$endpoint?url=$encodedUrl"
 
         val connection = URL(apiUrl)
             .openConnection() as HttpURLConnection

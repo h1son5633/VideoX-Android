@@ -70,10 +70,14 @@ internal val AccentColorState =
 
 // 底栏外观（启动时从 SettingsStore 恢复，设置页修改时同步更新）
 internal val NavStyleState =
-    mutableStateOf(SettingsStore.NAV_STYLE_BOARD)
+    mutableStateOf(SettingsStore.NAV_STYLE_SYSTEM)
 
 internal val NavBoardColorState =
     mutableStateOf(SettingsStore.DefaultNavBoardColor)
+
+// 当前选中的解析接口（启动时从 SettingsStore 恢复，设置页修改时同步更新）
+internal val ParseApiState =
+    mutableStateOf(SettingsStore.PARSE_API_1)
 
 internal val TextMain: Color
     get() = if (AppDarkState.value) {
@@ -102,6 +106,9 @@ class MainActivity : ComponentActivity() {
         // 恢复底栏外观设置
         NavStyleState.value = SettingsStore.navStyle(this)
         NavBoardColorState.value = SettingsStore.navBoardColor(this)
+
+        // 恢复解析接口选择
+        ParseApiState.value = SettingsStore.parseApi(this)
 
         sharedText = getSharedText(intent)
 
@@ -260,7 +267,13 @@ fun VideoXApp(sharedText: String) {
         }
 
         LaunchedEffect(Unit) {
-            pendingUpdate = checkForUpdate(updateContext)
+
+            val result = checkForUpdate(updateContext)
+
+            // 自动检查只在确实有新版时弹窗，其余情况静默
+            if (result is UpdateCheckResult.HasUpdate) {
+                pendingUpdate = result.info
+            }
         }
 
         pendingUpdate?.let { info ->

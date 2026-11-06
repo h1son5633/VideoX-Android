@@ -462,6 +462,93 @@ fun SettingsPage() {
 
         Spacer(Modifier.height(16.dp))
 
+        RoundedPanel {
+
+            Text(
+                "解析接口",
+                color = AccentColorState.value,
+                fontSize = 16.sp
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                "某个接口失效或变慢时，可以切换到其他接口",
+                color = TextMuted,
+                fontSize = 12.sp
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            val parseApiOptions = listOf(
+                Triple(
+                    SettingsStore.PARSE_API_1,
+                    "接口一（推荐）",
+                    "抖音、B站、动图全支持"
+                ),
+                Triple(
+                    SettingsStore.PARSE_API_2,
+                    "接口二",
+                    "抖音、B站、动图全支持，备用线路"
+                ),
+                Triple(
+                    SettingsStore.PARSE_API_3,
+                    "接口三",
+                    "仅抖音，速度快；动图只给静态图，B站自动切接口一"
+                )
+            )
+
+            parseApiOptions.forEachIndexed { index, option ->
+
+                if (index > 0) {
+                    Divider(color = Color(0xFF39443C))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            ParseApiState.value = option.first
+                            SettingsStore.setParseApi(
+                                context,
+                                option.first
+                            )
+                        }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+
+                    Column(Modifier.weight(1f)) {
+
+                        Text(
+                            option.second,
+                            color = TextMain,
+                            fontSize = 15.sp
+                        )
+
+                        Spacer(Modifier.height(2.dp))
+
+                        Text(
+                            option.third,
+                            color = TextMuted,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    if (ParseApiState.value == option.first) {
+
+                        Text(
+                            "✓",
+                            color = AccentColorState.value,
+                            fontSize = 18.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
         // 二级页入口（储存 / 关于）
         RoundedPanel {
 
@@ -800,17 +887,27 @@ fun SettingsPage() {
                             Toast.LENGTH_SHORT
                         ).show()
 
-                        val info = checkForUpdate(context)
+                        when (val result =
+                            checkForUpdate(context)) {
 
-                        if (info != null) {
-                            manualUpdate = info
-                        } else {
+                            is UpdateCheckResult.HasUpdate ->
+                                manualUpdate = result.info
 
-                            Toast.makeText(
-                                context,
-                                "已是最新版本",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            UpdateCheckResult.UpToDate ->
+
+                                Toast.makeText(
+                                    context,
+                                    "已是最新版本",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+
+                            is UpdateCheckResult.Failed ->
+
+                                Toast.makeText(
+                                    context,
+                                    "检查失败，请检查网络后重试",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                         }
                     }
                 }
