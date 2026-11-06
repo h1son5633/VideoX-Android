@@ -21,20 +21,27 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 import org.json.JSONObject
 
 import java.io.File
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicLong
 
-// 一个可用的新版本：版本号、发行说明（即弹窗里展示的更新内容）、APK 直链
+// 一个可用的新版本：版本号、发行说明（弹窗里展示的更新内容）、
+// APK 官方直链、发布标签（拼国内 CDN 备用线路用）
 data class UpdateInfo(
     val version: String,
     val notes: String,
-    val apkUrl: String
+    val apkUrl: String,
+    val tag: String
 )
 
 // 检查更新的三种结果，必须分开：以前统一返回 null，
@@ -194,7 +201,8 @@ suspend fun checkForUpdate(
                     UpdateInfo(
                         version = version,
                         notes = json.optString("body", "").trim(),
-                        apkUrl = apkUrl
+                        apkUrl = apkUrl,
+                        tag = json.optString("tag_name", "")
                     )
                 )
 
@@ -316,7 +324,7 @@ fun UpdateDialog(
 
                         val file = downloadUpdateApk(
                             context,
-                            info.apkUrl
+                            info
                         ) { percent ->
                             progress = percent
                         }
@@ -351,39 +359,294 @@ fun UpdateDialog(
     )
 }
 
-// 下载新 APK 到缓存目录（带进度回调）；失败返回 null
+// 下载新 APK 到缓存目录（带进度回调）；全部线路都失败才返回 null。
+// 背景：GitHub 官方文件服务器在国内网络经常连不上（v1.2.3 首次真机更新
+// 就卡在这一步），故按顺序尝试多条线路，每条线路都用多线程分段下载：
+// 1）gh-proxy 国内加速 2）ghfast 国内加速 3）jsdelivr CDN（仅版本号标签）
+// 4）GitHub 官方直链。安装时系统会校验签名，线路只影响能不能下下来。
 private suspend fun downloadUpdateApk(
     context: Context,
-    apkUrl: String,
+    info: UpdateInfo,
     onProgress: (Int) -> Unit
 ): File? {
 
     return withContext(Dispatchers.IO) {
 
+        val dir = context.externalCacheDir
+            ?: context.cacheDir
+        val file = File(dir, "videox-update.apk")
+
+        val sources = mutableListOf<String>()
+
+        sources.add("https://gh-proxy.com/" + info.apkUrl)
+        sources.add("https://ghfast.top/" + info.apkUrl)
+
+        if (info.tag.startsWith("v")) {
+            sources.add(
+                "https://fastly.jsdelivr.net/gh/" +
+                        "h1son5633/VideoX-Android@" + info.tag +
+                        "/app-release.apk"
+            )
+        }
+
+        sources.add(info.apkUrl)
+
+        for (source in sources) {
+
+            if (file.exists()) {
+                file.delete()
+            }
+
+            val ok = try {
+                downloadFromSource(source, file, onProgress)
+            } catch (e: Exception) {
+                false
+            }
+
+            if (ok && file.exists() && file.length() > 0) {
+                return@withContext file
+            }
+        }
+
+        null
+    }
+}
+
+// 打开一个带请求头的连接（各下载步骤共用）
+private fun openDownloadConnection(
+    url: String
+): HttpURLConnection {
+
+    val connection = URL(url)
+        .openConnection() as HttpURLConnection
+
+    connection.requestMethod = "GET"
+    connection.connectTimeout = 15000
+    connection.readTimeout = 30000
+
+    connection.setRequestProperty(
+        "User-Agent",
+        "VideoX-Android"
+    )
+
+    return connection
+}
+
+// 从一条线路下载：支持分段就 4 线程分段下（每段失败自动重试），
+// 不支持分段就单线程整下；下完校验总长度，不对算失败
+private suspend fun downloadFromSource(
+    url: String,
+    file: File,
+    onProgress: (Int) -> Unit
+): Boolean {
+
+    // 先用 1 字节的 Range 请求探一下总长和分段支持
+    var total = -1L
+
+    try {
+
+        val probe = openDownloadConnection(url)
+
         try {
 
-            val connection = URL(apkUrl)
-                .openConnection() as HttpURLConnection
+            probe.setRequestProperty(
+                "Range",
+                "bytes=0-0"
+            )
+
+            if (probe.responseCode == 206) {
+
+                val range = probe.getHeaderField(
+                    "Content-Range"
+                ) ?: ""
+
+                total = range.substringAfterLast("/")
+                    .toLongOrNull()
+                    ?: -1L
+            }
+
+        } finally {
+
+            probe.disconnect()
+        }
+
+    } catch (e: Exception) {
+
+        total = -1L
+    }
+
+    if (total > 0) {
+        return downloadRanged(url, file, total, onProgress)
+    }
+
+    return downloadWhole(url, file, onProgress)
+}
+
+// 多线程分段下载：4 段并行，每段独立连接、失败重试 3 次
+private suspend fun downloadRanged(
+    url: String,
+    file: File,
+    total: Long,
+    onProgress: (Int) -> Unit
+): Boolean {
+
+    val threads = 4
+    val counter = AtomicLong(0)
+
+    RandomAccessFile(file, "rw").use { raf ->
+        raf.setLength(total)
+    }
+
+    val partSize = (total + threads - 1) / threads
+
+    val results = coroutineScope {
+
+        (0 until threads).map { index ->
+
+            async(Dispatchers.IO) {
+
+                val start = index * partSize
+                val end = minOf(
+                    start + partSize - 1,
+                    total - 1
+                )
+
+                if (start > end) {
+                    true
+                } else {
+                    downloadPart(
+                        url,
+                        file,
+                        start,
+                        end,
+                        total,
+                        counter,
+                        onProgress
+                    )
+                }
+            }
+        }.awaitAll()
+    }
+
+    return results.all { it } && file.length() == total
+}
+
+// 下载一个分段并写到文件的对应偏移处；整段重试最多 3 次
+private fun downloadPart(
+    url: String,
+    file: File,
+    start: Long,
+    end: Long,
+    total: Long,
+    counter: AtomicLong,
+    onProgress: (Int) -> Unit
+): Boolean {
+
+    val length = end - start + 1
+
+    // 本段已计入总进度的字节数（重试重下时不重复计数）
+    var counted = 0L
+
+    for (attempt in 1..3) {
+
+        try {
+
+            val connection = openDownloadConnection(url)
 
             try {
 
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 20000
-                connection.readTimeout = 30000
-
                 connection.setRequestProperty(
-                    "User-Agent",
-                    "VideoX-Android"
+                    "Range",
+                    "bytes=$start-$end"
                 )
 
+                // 分段必须回 206；回 200 说明线路无视 Range，会写坏文件
+                if (connection.responseCode != 206) {
+                    return false
+                }
+
+                RandomAccessFile(file, "rw").use { raf ->
+
+                    raf.seek(start)
+
+                    connection.inputStream?.use { input ->
+
+                        val buffer = ByteArray(64 * 1024)
+                        var written = 0L
+
+                        while (true) {
+
+                            val read = input.read(buffer)
+
+                            if (read < 0) {
+                                break
+                            }
+
+                            raf.write(buffer, 0, read)
+                            written += read
+
+                            val delta = written - counted
+
+                            val done = if (delta > 0) {
+                                counted = written
+                                counter.addAndGet(delta)
+                            } else {
+                                counter.get()
+                            }
+
+                            onProgress(
+                                ((done * 100) / total)
+                                    .toInt()
+                                    .coerceIn(0, 100)
+                            )
+                        }
+
+                        if (written != length) {
+                            throw Exception("分段长度不符")
+                        }
+                    } ?: throw Exception("无数据")
+                }
+
+                return true
+
+            } finally {
+
+                connection.disconnect()
+            }
+
+        } catch (e: Exception) {
+
+            if (attempt == 3) {
+                return false
+            }
+
+            Thread.sleep(600)
+        }
+    }
+
+    return false
+}
+
+// 单线程整体下载（线路不支持分段时）；失败重试 2 次，下完校验长度
+private fun downloadWhole(
+    url: String,
+    file: File,
+    onProgress: (Int) -> Unit
+): Boolean {
+
+    for (attempt in 1..2) {
+
+        try {
+
+            val connection = openDownloadConnection(url)
+
+            try {
+
                 if (connection.responseCode !in 200..299) {
-                    return@withContext null
+                    return false
                 }
 
                 val total = connection.contentLengthLong
-                val dir = context.externalCacheDir
-                    ?: context.cacheDir
-                val file = File(dir, "videox-update.apk")
 
                 connection.inputStream?.use { input ->
 
@@ -412,11 +675,15 @@ private suspend fun downloadUpdateApk(
                                 )
                             }
                         }
+
+                        if (total > 0 && downloaded != total) {
+                            throw Exception("长度不符")
+                        }
                     }
 
-                } ?: return@withContext null
+                } ?: return false
 
-                file
+                return file.length() > 0
 
             } finally {
 
@@ -425,9 +692,15 @@ private suspend fun downloadUpdateApk(
 
         } catch (e: Exception) {
 
-            null
+            if (attempt == 2) {
+                return false
+            }
+
+            Thread.sleep(600)
         }
     }
+
+    return false
 }
 
 // 拉起系统安装器覆盖安装；未授予“安装未知应用”时先引导去授权
