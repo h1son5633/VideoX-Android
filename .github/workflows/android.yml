@@ -63,11 +63,11 @@ jobs:
       - name: Publish APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.4
-          name: VideoX v1.2.4（Build #${{ github.run_number }}）
+          tag_name: v1.2.5
+          name: VideoX v1.2.5（Build #${{ github.run_number }}）
           body: |
-            VideoX Android v1.2.4：修复应用内更新下载，国内网络也能直接更新。
-            - 更新下载重做：多线程分段下载 + 多条线路自动切换（国内加速线路优先），解决“下载失败”
+            VideoX Android v1.2.5：解析失败自动换接口。
+            - 当前接口解析失败时自动顺延到下一个接口重试，抖音图文笔记等帖子也能解析，不用再手动切换接口
             构建编号：${{ github.run_number }}
           files: app/build/outputs/apk/release/app-release.apk
           prerelease: false
