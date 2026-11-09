@@ -521,11 +521,9 @@ fun ParsePage(sharedText: String) {
                                     "解析成功，但没有获取到可下载的内容"
                             }
 
-                            if (outcome.apiUsed !=
-                                ParseApiState.value
-                            ) {
+                            if (outcome.notice.isNotBlank()) {
                                 message +=
-                                    "（接口三不支持 B 站，已自动用接口一解析）"
+                                    "（${outcome.notice}）"
                             }
 
                             if (recognized) {
@@ -1879,16 +1877,20 @@ fun extractShareLink(input: String): Pair<String, String>? {
 }
 
 // 一次解析的结果：统一格式的 JSON + 实际用上的接口编号
-// （接口三不支持 B 站会回落到接口一，界面需要据此提示用户）
+// + 给界面的附加提示（自动换了接口时说明换到了哪一家）
 data class ParseOutcome(
     val json: JSONObject,
-    val apiUsed: Int
+    val apiUsed: Int,
+    val notice: String = ""
 )
 
-// 请求解析接口，按用户在设置里选的接口分发（2026-11-06 逐家实测）：
-// 接口一 odysphere：抖音/B站/动图全支持，默认推荐
-// 接口二 bugpk：返回结构与接口一相同，抖音/B站/动图全支持，备用线路
-// 接口三 xingzhige：仅抖音、速度快，但动图只返回静态图，返回结构不同需适配
+// 请求解析接口（2026-11-06 逐家实测，2026-11-09 改为自动换接口）：
+// 接口一 odysphere：抖音/B站/动图全支持，默认推荐；不支持抖音图文笔记（note）
+// 接口二 bugpk：返回结构与接口一相同，抖音/B站/动图/图文笔记全支持
+// 接口三 xingzhige：仅抖音、速度快，但动图只返回静态图，返回结构不同需适配；
+// 同样不支持图文笔记
+// 形态（用户 2026-11-09 定）：每条链接自动选接口——用户选定的接口第一顺位，
+// 失败（报错、网络异常、或返回空壳）自动顺延到下一个接口重试，不再手动切换。
 suspend fun parseShare(
     inputUrl: String,
     platform: String,
@@ -1906,17 +1908,83 @@ suspend fun parseShare(
         "douyin"
     }
 
-    // 接口三不支持 B 站：自动回落到接口一
-    val effectiveApi =
-        if (apiId == SettingsStore.PARSE_API_3 &&
-            platform == "bilibili"
-        ) {
-            SettingsStore.PARSE_API_1
+    // 候选顺序：选定接口第一顺位，其余按一→二→三补齐；
+    // 接口三不支持 B 站，B 站候选只有一、二
+    val allApis =
+        if (platform == "bilibili") {
+            listOf(
+                SettingsStore.PARSE_API_1,
+                SettingsStore.PARSE_API_2
+            )
         } else {
-            apiId
+            listOf(
+                SettingsStore.PARSE_API_1,
+                SettingsStore.PARSE_API_2,
+                SettingsStore.PARSE_API_3
+            )
         }
 
-    val json = when (effectiveApi) {
+    val candidates =
+        listOf(apiId).filter { it in allApis } +
+                allApis.filter { it != apiId }
+
+    var lastJson: JSONObject? = null
+    var lastError: Exception? = null
+
+    for (candidate in candidates) {
+
+        try {
+
+            val json = fetchParseForApi(
+                candidate,
+                endpoint,
+                encodedUrl
+            )
+
+            if (isParseSuccess(json)) {
+
+                val notice =
+                    when {
+
+                        candidate != candidates.first() ->
+                            "接口${apiName(candidates.first())}解析失败，已自动切换接口${apiName(candidate)}"
+
+                        apiId == SettingsStore.PARSE_API_3 &&
+                                platform == "bilibili" ->
+                            "接口三不支持 B 站，已自动用接口一解析"
+
+                        else -> ""
+                    }
+
+                return ParseOutcome(json, candidate, notice)
+            }
+
+            lastJson = json
+
+        } catch (e: Exception) {
+
+            lastError = e
+        }
+    }
+
+    // 全部接口都失败：有错误 JSON 就透传最后一个（界面显示其 msg/code），
+    // 否则把最后一个网络异常抛出去由界面提示
+    if (lastJson != null) {
+
+        return ParseOutcome(lastJson, candidates.last())
+    }
+
+    throw lastError ?: Exception("所有解析接口都请求失败")
+}
+
+// 单个接口的请求分发（原 parseShare 的分发逻辑）
+private suspend fun fetchParseForApi(
+    apiId: Int,
+    endpoint: String,
+    encodedUrl: String
+): JSONObject {
+
+    return when (apiId) {
 
         SettingsStore.PARSE_API_2 -> fetchParseJson(
             "https://api.bugpk.com/api/$endpoint?url=$encodedUrl"
@@ -1932,8 +2000,48 @@ suspend fun parseShare(
             "https://api.odysphere.tech/jiexi/$endpoint?url=$encodedUrl"
         )
     }
+}
 
-    return ParseOutcome(json, effectiveApi)
+// 判定一次解析是否真的拿到了可下载内容：code=200 且 data 里有视频直链、
+// 或非空的图片/动图列表；只有空壳的 200 也算失败，继续换下一个接口
+private fun isParseSuccess(json: JSONObject): Boolean {
+
+    if (json.optInt("code") != 200) {
+        return false
+    }
+
+    val data = json.optJSONObject("data") ?: return false
+
+    if (data.optString("url", "").startsWith("http")) {
+        return true
+    }
+
+    val images = data.optJSONArray("images")
+
+    if (images != null && images.length() > 0) {
+        return true
+    }
+
+    val livePhoto = data.optJSONArray("live_photo")
+
+    if (livePhoto != null && livePhoto.length() > 0) {
+        return true
+    }
+
+    return false
+}
+
+// 接口编号转中文序号（提示文案用）
+private fun apiName(apiId: Int): String {
+
+    return when (apiId) {
+
+        SettingsStore.PARSE_API_2 -> "二"
+
+        SettingsStore.PARSE_API_3 -> "三"
+
+        else -> "一"
+    }
 }
 
 // 把接口三（xingzhige）的返回适配成与接口一相同的结构：
