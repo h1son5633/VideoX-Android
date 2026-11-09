@@ -362,8 +362,9 @@ fun UpdateDialog(
 // 下载新 APK 到缓存目录（带进度回调）；全部线路都失败才返回 null。
 // 背景：GitHub 官方文件服务器在国内网络经常连不上（v1.2.3 首次真机更新
 // 就卡在这一步），故按顺序尝试多条线路，每条线路都用多线程分段下载：
-// 1）gh-proxy 国内加速 2）ghfast 国内加速 3）jsdelivr CDN（仅版本号标签）
-// 4）GitHub 官方直链。安装时系统会校验签名，线路只影响能不能下下来。
+// 1）gh-proxy 国内加速 2）ghfast 国内加速 3）GitHub 官方直链。
+// （jsdelivr 线路实测对本仓库始终 404，2026-11-09 已移除。）
+// 安装时系统会校验签名，线路只影响能不能下下来。
 private suspend fun downloadUpdateApk(
     context: Context,
     info: UpdateInfo,
@@ -380,15 +381,6 @@ private suspend fun downloadUpdateApk(
 
         sources.add("https://gh-proxy.com/" + info.apkUrl)
         sources.add("https://ghfast.top/" + info.apkUrl)
-
-        if (info.tag.startsWith("v")) {
-            sources.add(
-                "https://fastly.jsdelivr.net/gh/" +
-                        "h1son5633/VideoX-Android@" + info.tag +
-                        "/app-release.apk"
-            )
-        }
-
         sources.add(info.apkUrl)
 
         for (source in sources) {
