@@ -672,7 +672,7 @@ fun DownloadPage() {
                 )
 
                 val mediaTypeIndex = it.getColumnIndex(
-                    DownloadManager.COLUMN_MEDIATYPE
+                    DownloadManager.COLUMN_MEDIA_TYPE
                 )
 
                 while (it.moveToNext()) {
