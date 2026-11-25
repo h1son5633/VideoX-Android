@@ -2,6 +2,7 @@ package com.videox.app
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -59,7 +60,10 @@ data class DownloadRecord(
     val status: String,
     val progress: Int,
     val sizeText: String,
-    val reason: String
+    val reason: String,
+    val statusCode: Int,
+    val localUri: String,
+    val mediaType: String
 )
 
 // 下载视频（会读取设置：仅 Wi-Fi 下载、默认保存到相册）
@@ -608,6 +612,11 @@ fun DownloadPage() {
         mutableStateOf("全部")
     }
 
+    // 等待确认删除的记录（非空时弹确认框）
+    var recordToDelete by remember {
+        mutableStateOf<DownloadRecord?>(null)
+    }
+
     val shownRecords = if (typeFilter == "全部") {
         records
     } else {
@@ -656,6 +665,14 @@ fun DownloadPage() {
 
                 val totalIndex = it.getColumnIndex(
                     DownloadManager.COLUMN_TOTAL_SIZE_BYTES
+                )
+
+                val localUriIndex = it.getColumnIndex(
+                    DownloadManager.COLUMN_LOCAL_URI
+                )
+
+                val mediaTypeIndex = it.getColumnIndex(
+                    DownloadManager.COLUMN_MEDIATYPE
                 )
 
                 while (it.moveToNext()) {
@@ -761,7 +778,18 @@ fun DownloadPage() {
                             status = statusText,
                             progress = progress,
                             sizeText = sizeText,
-                            reason = reasonText
+                            reason = reasonText,
+                            statusCode = statusCode,
+                            localUri = if (localUriIndex >= 0) {
+                                it.getString(localUriIndex).orEmpty()
+                            } else {
+                                ""
+                            },
+                            mediaType = if (mediaTypeIndex >= 0) {
+                                it.getString(mediaTypeIndex).orEmpty()
+                            } else {
+                                ""
+                            }
                         )
                     )
                 }
@@ -865,6 +893,60 @@ fun DownloadPage() {
 
     LaunchedEffect(Unit) {
         refreshDownloads()
+    }
+
+    // 删除确认框：DownloadManager.remove 会连文件带记录一起删
+    recordToDelete?.let { target ->
+
+        AlertDialog(
+            onDismissRequest = {
+                recordToDelete = null
+            },
+            title = {
+                Text("删除这条下载？")
+            },
+            text = {
+                Text("会同时删除已下载的文件和这条记录，删后无法恢复。")
+            },
+            confirmButton = {
+
+                TextButton(
+                    onClick = {
+
+                        recordToDelete = null
+
+                        val ok = deleteDownloadRecord(
+                            context,
+                            target
+                        )
+
+                        Toast.makeText(
+                            context,
+                            if (ok) {
+                                "已删除"
+                            } else {
+                                "删除失败"
+                            },
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        refreshDownloads()
+                    }
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+
+                TextButton(
+                    onClick = {
+                        recordToDelete = null
+                    }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
     }
 
     Column(
@@ -1085,6 +1167,64 @@ fun DownloadPage() {
                         color = TextMuted,
                         fontSize = 11.sp
                     )
+
+                    if (record.statusCode ==
+                        DownloadManager.STATUS_SUCCESSFUL
+                    ) {
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Row {
+
+                            OutlinedButton(
+                                onClick = {
+                                    openDownloadedFile(
+                                        context,
+                                        record
+                                    )
+                                }
+                            ) {
+                                Text("打开")
+                            }
+
+                            Spacer(Modifier.width(8.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    shareDownloadedFile(
+                                        context,
+                                        record
+                                    )
+                                }
+                            ) {
+                                Text("分享")
+                            }
+
+                            Spacer(Modifier.width(8.dp))
+
+                            OutlinedButton(
+                                onClick = {
+                                    recordToDelete = record
+                                }
+                            ) {
+                                Text("删除")
+                            }
+                        }
+
+                    } else if (record.statusCode ==
+                        DownloadManager.STATUS_FAILED
+                    ) {
+
+                        Spacer(Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                recordToDelete = record
+                            }
+                        ) {
+                            Text("删除记录")
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(12.dp))
@@ -1092,6 +1232,134 @@ fun DownloadPage() {
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+// 取已下载文件的可分享/可打开地址（DownloadManager 的 content 地址，
+// 自带临时读权限，外部播放器/相册能直接读）；文件已不在时返回 null
+fun downloadedFileUri(
+    context: Context,
+    record: DownloadRecord
+): Uri? {
+
+    return try {
+
+        val manager = context.getSystemService(
+            Context.DOWNLOAD_SERVICE
+        ) as DownloadManager
+
+        manager.getUriForDownloadedFile(record.id)
+
+    } catch (e: Exception) {
+        null
+    }
+}
+
+// 用系统应用打开已下载的文件（视频进播放器、图片进相册、音乐进播放器）
+fun openDownloadedFile(
+    context: Context,
+    record: DownloadRecord
+) {
+
+    val uri = downloadedFileUri(context, record)
+
+    if (uri == null) {
+
+        Toast.makeText(
+            context,
+            "文件不存在或已被删除",
+            Toast.LENGTH_SHORT
+        ).show()
+
+        return
+    }
+
+    try {
+
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(
+                uri,
+                record.mediaType.ifBlank { "*/*" }
+            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        context.startActivity(intent)
+
+    } catch (e: Exception) {
+
+        Toast.makeText(
+            context,
+            "没有能打开这个文件的应用",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+// 把已下载的文件分享出去（微信/QQ 等）
+fun shareDownloadedFile(
+    context: Context,
+    record: DownloadRecord
+) {
+
+    val uri = downloadedFileUri(context, record)
+
+    if (uri == null) {
+
+        Toast.makeText(
+            context,
+            "文件不存在或已被删除",
+            Toast.LENGTH_SHORT
+        ).show()
+
+        return
+    }
+
+    try {
+
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = record.mediaType.ifBlank { "*/*" }
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        val chooser = Intent.createChooser(
+            intent,
+            "分享文件"
+        ).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        context.startActivity(chooser)
+
+    } catch (e: Exception) {
+
+        Toast.makeText(
+            context,
+            "分享失败：${e.message}",
+            Toast.LENGTH_SHORT
+        ).show()
+    }
+}
+
+// 删除一条下载：DownloadManager.remove 连文件带记录一起删，
+// 返回 true 表示确实删掉了
+fun deleteDownloadRecord(
+    context: Context,
+    record: DownloadRecord
+): Boolean {
+
+    return try {
+
+        val manager = context.getSystemService(
+            Context.DOWNLOAD_SERVICE
+        ) as DownloadManager
+
+        manager.remove(record.id) > 0
+
+    } catch (e: Exception) {
+        false
     }
 }
 

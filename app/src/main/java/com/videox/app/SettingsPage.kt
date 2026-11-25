@@ -462,6 +462,15 @@ fun SettingsPage() {
 
         Spacer(Modifier.height(16.dp))
 
+        // 接口测速状态：apiId -> 耗时毫秒（null = 无响应），测完才有值
+        var apiSpeedResults by remember {
+            mutableStateOf<Map<Int, Long?>>(emptyMap())
+        }
+
+        var apiSpeedTesting by remember {
+            mutableStateOf(false)
+        }
+
         RoundedPanel {
 
             Text(
@@ -533,6 +542,22 @@ fun SettingsPage() {
                             color = TextMuted,
                             fontSize = 12.sp
                         )
+
+                        val speedText = apiSpeedLabel(
+                            option.first,
+                            apiSpeedResults
+                        )
+
+                        if (speedText != null) {
+
+                            Spacer(Modifier.height(2.dp))
+
+                            Text(
+                                speedText,
+                                color = AccentColorState.value,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
 
                     if (ParseApiState.value == option.first) {
@@ -545,6 +570,59 @@ fun SettingsPage() {
                     }
                 }
             }
+
+            Divider(color = Color(0xFF39443C))
+
+            Spacer(Modifier.height(10.dp))
+
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+
+                    if (!apiSpeedTesting) {
+
+                        apiSpeedTesting = true
+                        apiSpeedResults = emptyMap()
+
+                        scope.launch {
+
+                            val results =
+                                mutableMapOf<Int, Long?>()
+
+                            listOf(
+                                SettingsStore.PARSE_API_1,
+                                SettingsStore.PARSE_API_2,
+                                SettingsStore.PARSE_API_3
+                            ).forEach { api ->
+
+                                results[api] =
+                                    measureParseApiLatencyMs(api)
+
+                                apiSpeedResults =
+                                    results.toMap()
+                            }
+
+                            apiSpeedTesting = false
+                        }
+                    }
+                }
+            ) {
+                Text(
+                    if (apiSpeedTesting) {
+                        "测速中..."
+                    } else {
+                        "接口测速"
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                "依次实测三个接口解析同一条样例链接的耗时，结果显示在各接口下方",
+                color = TextMuted,
+                fontSize = 12.sp
+            )
         }
 
         Spacer(Modifier.height(16.dp))
@@ -1175,6 +1253,42 @@ fun FolderRow(
         TextButton(onClick = onCopy) {
             Text("复制")
         }
+    }
+}
+
+// 耗时毫秒格式化：1 秒内显示 ms，超过显示一位小数秒
+fun formatLatencyMs(ms: Long): String {
+
+    return if (ms < 1000) {
+        "${ms}ms"
+    } else {
+        String.format("%.1fs", ms / 1000.0)
+    }
+}
+
+// 测速结果转成接口选项下方的标注；还没测过返回 null 不显示，
+// 无响应显示“无响应”，最快的那个带“· 最快”
+fun apiSpeedLabel(
+    apiId: Int,
+    results: Map<Int, Long?>
+): String? {
+
+    if (!results.containsKey(apiId)) {
+        return null
+    }
+
+    val ms = results[apiId] ?: return "测速：无响应"
+
+    val fastest = results.values
+        .filterNotNull()
+        .minOrNull()
+
+    return if (fastest != null && ms == fastest &&
+        results.values.filterNotNull().size > 1
+    ) {
+        "测速：${formatLatencyMs(ms)} · 最快"
+    } else {
+        "测速：${formatLatencyMs(ms)}"
     }
 }
 

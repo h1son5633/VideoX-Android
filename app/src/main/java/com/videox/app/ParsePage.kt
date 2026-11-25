@@ -51,6 +51,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 import java.net.URL
@@ -325,15 +326,20 @@ fun ParsePage(sharedText: String) {
                         if (code == 200 && data != null) {
 
                             val defaultTitle =
-                                if (platform == "bilibili") {
-                                    "B站视频"
-                                } else {
-                                    "抖音视频"
+                                when (platform) {
+
+                                    "bilibili" -> "B站视频"
+
+                                    "instagram" -> "Instagram 作品"
+
+                                    else -> "抖音视频"
                                 }
 
-                            videoTitle = data.optString(
-                                "title",
-                                defaultTitle
+                            videoTitle = cleanJsonString(
+                                data.optString(
+                                    "title",
+                                    defaultTitle
+                                )
                             ).ifBlank {
                                 defaultTitle
                             }
@@ -383,14 +389,18 @@ fun ParsePage(sharedText: String) {
                                 else -> "未知作者"
                             }
 
-                            coverUrl = data.optString(
-                                "cover",
-                                ""
+                            coverUrl = cleanJsonString(
+                                data.optString(
+                                    "cover",
+                                    ""
+                                )
                             )
 
-                            videoUrl = data.optString(
-                                "url",
-                                ""
+                            videoUrl = cleanJsonString(
+                                data.optString(
+                                    "url",
+                                    ""
+                                )
                             )
 
                             contentType = data.optString(
@@ -475,20 +485,26 @@ fun ParsePage(sharedText: String) {
                             val musicObject =
                                 data.optJSONObject("music")
 
-                            musicTitle = musicObject?.optString(
-                                "title",
-                                ""
-                            ) ?: ""
+                            musicTitle = cleanJsonString(
+                                musicObject?.optString(
+                                    "title",
+                                    ""
+                                ) ?: ""
+                            )
 
-                            musicAuthor = musicObject?.optString(
-                                "author",
-                                ""
-                            ) ?: ""
+                            musicAuthor = cleanJsonString(
+                                musicObject?.optString(
+                                    "author",
+                                    ""
+                                ) ?: ""
+                            )
 
-                            musicUrl = musicObject?.optString(
-                                "url",
-                                ""
-                            ) ?: ""
+                            musicUrl = cleanJsonString(
+                                musicObject?.optString(
+                                    "url",
+                                    ""
+                                ) ?: ""
+                            )
 
                             val hasVideo =
                                 videoUrl.startsWith("http://") ||
@@ -742,7 +758,9 @@ Spacer(Modifier.height(10.dp))
 
 val tabTitles = mutableListOf<String>()
 
-if (videoUrl.isNotBlank()) {
+if (videoUrl.startsWith("http://") ||
+videoUrl.startsWith("https://")
+) {
 tabTitles.add("视频下载")
 }
 
@@ -1417,7 +1435,7 @@ modifier = Modifier.fillMaxWidth(),
 textStyle = TextStyle(fontSize = 15.sp),
 placeholder = {
 Text(
-"粘贴抖音/B站分享文案或视频链接",
+"粘贴抖音/B站/Instagram 分享文案或链接",
 fontSize = 14.sp
 )
 },
@@ -1457,7 +1475,7 @@ if (url.isNotBlank() && extractShareLink(url) == null) {
 Spacer(Modifier.height(6.dp))
 
 Text(
-"没识别到支持的链接（抖音/B站）",
+"没识别到支持的链接（抖音/B站/Instagram）",
 color = Color(0xFFD32F2F),
 fontSize = 12.sp
 )
@@ -1619,6 +1637,8 @@ vertical = 2.dp
 Text(
 if (entry.platform == "bilibili") {
 "B站"
+} else if (entry.platform == "instagram") {
+"Instagram"
 } else {
 "抖音"
 },
@@ -1844,7 +1864,7 @@ modifier = Modifier
 }
 
 // 提取受支持平台的分享链接并判定平台：返回 (链接, 平台标识)
-// 平台标识：douyin = 抖音，bilibili = B站
+// 平台标识：douyin = 抖音，bilibili = B站，instagram = Instagram
 fun extractShareLink(input: String): Pair<String, String>? {
 
     val douyinRegex = Regex(
@@ -1873,6 +1893,19 @@ fun extractShareLink(input: String): Pair<String, String>? {
         return bilibiliUrl to "bilibili"
     }
 
+    val instagramRegex = Regex(
+        """https?://(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/[^\s，。]+""",
+        RegexOption.IGNORE_CASE
+    )
+
+    val instagramUrl = instagramRegex.find(input)
+        ?.value
+        ?.trimEnd('.', ',', '，', '。', ')', '）')
+
+    if (instagramUrl != null) {
+        return instagramUrl to "instagram"
+    }
+
     return null
 }
 
@@ -1896,6 +1929,12 @@ suspend fun parseShare(
     platform: String,
     apiId: Int
 ): ParseOutcome {
+
+    // Instagram 走独立接口（见 parseInstagram），不参与接口一/二/三的轮换
+    if (platform == "instagram") {
+
+        return parseInstagram(inputUrl, apiId)
+    }
 
     val encodedUrl = URLEncoder.encode(
         inputUrl.trim(),
@@ -1977,6 +2016,208 @@ suspend fun parseShare(
     throw lastError ?: Exception("所有解析接口都请求失败")
 }
 
+// Instagram 解析（2026-11-25 实测）：现有接口一/二/三都不支持 IG，
+// 官方网页接口未登录已被封；可用的是 anon-tweet 的公开只读接口
+// GET https://anon-tweet.chilfish.top/api/ig/get/{shortcode}
+// 返回 JSON 数组：帖子对象含 username/fullname/description/avatar_url，
+// media[] 每项含 type（video/photo）、video_url、display_url；
+// 帖子不存在/私密/被删时返回空数组 []。
+// 这里适配成与接口一相同的统一结构再交给界面。
+private suspend fun parseInstagram(
+    inputUrl: String,
+    apiId: Int
+): ParseOutcome {
+
+    val shortcode = Regex(
+        """(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)"""
+    ).find(inputUrl)?.groupValues?.get(1)
+
+    if (shortcode == null) {
+
+        return ParseOutcome(
+            JSONObject()
+                .put("code", 400)
+                .put("msg", "链接里没找到 Instagram 帖子编号"),
+            apiId
+        )
+    }
+
+    val posts = fetchInstagramPosts(shortcode)
+
+    val post = posts.optJSONObject(0)
+
+    if (post == null) {
+
+        return ParseOutcome(
+            JSONObject()
+                .put("code", 404)
+                .put("msg", "解析失败：帖子不存在、已删除，或是私密账号的帖子"),
+            apiId
+        )
+    }
+
+    val media = post.optJSONArray("media")
+
+    var firstVideoUrl = ""
+
+    var firstVideoCover = ""
+
+    val images = JSONArray()
+
+    if (media != null) {
+
+        for (i in 0 until media.length()) {
+
+            val item = media.optJSONObject(i) ?: continue
+
+            val displayUrl = item.optString("display_url", "")
+
+            val videoUrl = item.optString("video_url", "")
+
+            if (item.optString("type", "") == "video" &&
+                videoUrl.startsWith("http")
+            ) {
+
+                if (firstVideoUrl.isEmpty()) {
+
+                    firstVideoUrl = videoUrl
+
+                    firstVideoCover = displayUrl
+                }
+                // 轮播里第二个起的视频暂不收（结果页只有一个视频位）
+
+            } else if (displayUrl.startsWith("http")) {
+
+                images.put(displayUrl)
+            }
+        }
+    }
+
+    if (firstVideoUrl.isEmpty() && images.length() == 0) {
+
+        return ParseOutcome(
+            JSONObject()
+                .put("code", 404)
+                .put("msg", "解析失败：没有拿到可下载的图片或视频"),
+            apiId
+        )
+    }
+
+    val caption = post.optString("description", "")
+
+    val data = JSONObject()
+
+    data.put(
+        "type",
+        if (firstVideoUrl.isNotEmpty()) { "video" } else { "image" }
+    )
+
+    data.put("url", firstVideoUrl)
+
+    data.put(
+        "cover",
+        firstVideoCover.ifEmpty {
+            if (images.length() > 0) { images.optString(0, "") } else { "" }
+        }
+    )
+
+    data.put("images", images)
+
+    data.put(
+        "title",
+        caption.lineSequence().firstOrNull()?.take(60) ?: ""
+    )
+
+    data.put("desc", caption)
+
+    data.put(
+        "author",
+        JSONObject()
+            .put(
+                "name",
+                post.optString("fullname", "")
+                    .ifBlank { post.optString("username", "") }
+            )
+            .put("avatar", post.optString("avatar_url", ""))
+    )
+
+    return ParseOutcome(
+        JSONObject()
+            .put("code", 200)
+            .put("data", data),
+        apiId
+    )
+}
+
+// 请求 anon-tweet 的 IG 接口，返回帖子数组（网络失败抛异常，由界面统一提示）
+private suspend fun fetchInstagramPosts(
+    shortcode: String
+): JSONArray {
+
+    return withContext(Dispatchers.IO) {
+
+        val connection = URL(
+            "https://anon-tweet.chilfish.top/api/ig/get/$shortcode"
+        ).openConnection() as HttpURLConnection
+
+        try {
+
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 20000
+            connection.readTimeout = 30000
+
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0"
+            )
+
+            connection.setRequestProperty(
+                "Accept",
+                "application/json"
+            )
+
+            val status = connection.responseCode
+
+            val stream = if (status in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+
+            val response = stream
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: throw Exception(
+                    "服务器没有返回内容，HTTP $status"
+                )
+
+            if (status !in 200..299) {
+
+                throw Exception(
+                    "接口 HTTP $status：${response.take(300)}"
+                )
+            }
+
+            val cleanResponse = response
+                .removePrefix("﻿")
+                .trim()
+
+            if (!cleanResponse.startsWith("[")) {
+
+                throw Exception(
+                    "接口返回的不是 JSON 数组：${cleanResponse.take(200)}"
+                )
+            }
+
+            JSONArray(cleanResponse)
+
+        } finally {
+
+            connection.disconnect()
+        }
+    }
+}
+
 // 单个接口的请求分发（原 parseShare 的分发逻辑）
 private suspend fun fetchParseForApi(
     apiId: Int,
@@ -2041,6 +2282,48 @@ private fun apiName(apiId: Int): String {
         SettingsStore.PARSE_API_3 -> "三"
 
         else -> "一"
+    }
+}
+
+// 测速用的样例链接（一条已验证长期有效的抖音动图帖）
+private const val SPEED_TEST_SAMPLE_URL =
+    "https://v.douyin.com/sZKU3W_RKrU/"
+
+// 测某个接口解析样例链接的完整响应耗时（毫秒），供设置页“接口测速”用；
+// 网络异常返回 null。只测耗时不判成败：接口有响应就算测到（哪怕回错误码）。
+suspend fun measureParseApiLatencyMs(apiId: Int): Long? {
+
+    val encodedUrl = URLEncoder.encode(
+        SPEED_TEST_SAMPLE_URL,
+        "UTF-8"
+    )
+
+    val start = System.nanoTime()
+
+    return try {
+
+        fetchParseForApi(apiId, "douyin", encodedUrl)
+
+        (System.nanoTime() - start) / 1_000_000
+
+    } catch (e: Exception) {
+
+        null
+    }
+}
+
+// 接口 JSON 里的 null 会被 Android 的 optString 读成字符串 "null"，
+// 不是空串（接口二对纯图文帖就是这样：url=null 却读出 "null"，
+// 曾导致结果页误建“视频下载”页签、点预览报无法播放）。
+// 凡是从接口 JSON 读出来的字符串都过一遍这里，把 "null" 清成空串。
+fun cleanJsonString(raw: String): String {
+
+    val value = raw.trim()
+
+    return if (value.equals("null", ignoreCase = true)) {
+        ""
+    } else {
+        value
     }
 }
 
@@ -2230,6 +2513,8 @@ fun detectPlatform(input: String): String {
         "pipix.com" in text -> "皮皮虾"
 
         "toutiao.com" in text -> "今日头条"
+
+        "instagram.com" in text -> "Instagram"
 
         else -> "未知平台"
     }

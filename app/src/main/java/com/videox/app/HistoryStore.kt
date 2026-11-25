@@ -122,6 +122,10 @@ object HistoryStore {
             sourceUrl.contains("bilibili")
         ) {
             "bilibili"
+        } else if (
+            sourceUrl.contains("instagram.com")
+        ) {
+            "instagram"
         } else {
             "douyin"
         }
