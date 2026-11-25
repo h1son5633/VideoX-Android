@@ -63,11 +63,14 @@ jobs:
       - name: Publish APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.5
-          name: VideoX v1.2.5（Build #${{ github.run_number }}）
+          tag_name: v1.3.0
+          name: VideoX v1.3.0（Build #${{ github.run_number }}）
           body: |
-            VideoX Android v1.2.5：解析失败自动换接口。
-            - 当前接口解析失败时自动顺延到下一个接口重试，抖音图文笔记等帖子也能解析，不用再手动切换接口
+            VideoX Android v1.3.0：新增 Instagram 解析。
+            - 新增 Instagram 解析：粘贴 Instagram 帖子或 Reels 链接即可下载图片和视频（仅公开帖子）
+            - 修复纯图文帖误出现“视频下载”页签的问题
+            - 下载记录里的文件可直接打开、分享、删除
+            - 设置页新增解析接口测速
             构建编号：${{ github.run_number }}
           files: app/build/outputs/apk/release/app-release.apk
           prerelease: false
